@@ -99,7 +99,6 @@
         "Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module",
         "SWDEV-442583: Below tests failing in stress test on 12/01/24 ===",
         "Unit_hipLaunchCooperativeKernelMultiDevice_Negative_Parameters",
-        "Unit_hipLaunchCooperativeKernelMultiDevice_Negative_MultiKernelSameDevice",
         "Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice",
         "=== Below tests are failing PSDB ===",
         "Unit_hipLaunchCooperativeKernel_Negative_Parameters",
