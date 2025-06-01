@@ -19,6 +19,9 @@
  THE SOFTWARE. */
 
 #include "hip_graph_internal.hpp"
+
+#include <simde/x86/sse2.h>
+
 #include <queue>
 
 #define CASE_STRING(X, C)                                                                          \
@@ -1200,9 +1203,9 @@ void GraphKernelArgManager::ReadBackOrFlush() {
       
       // Read-modify-write sequence with memory barriers
       volatile unsigned char kSentinel = *sentinel_ptr;
-      _mm_sfence();
+      simde_mm_sfence();
       *sentinel_ptr = kSentinel;
-      _mm_mfence();
+      simde_mm_mfence();
       kSentinel = *sentinel_ptr;
       (void)kSentinel; // Suppress unused variable warning
     }
