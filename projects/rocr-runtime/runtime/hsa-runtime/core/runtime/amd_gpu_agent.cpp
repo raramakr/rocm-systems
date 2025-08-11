@@ -59,6 +59,7 @@
 #include "core/inc/amd_blit_sdma.h"
 #include "core/inc/amd_gpu_pm4.h"
 #include "core/inc/amd_memory_region.h"
+#include "core/inc/amd_pm4_queue.h"
 #include "core/inc/default_signal.h"
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/isa.h"
@@ -1687,6 +1688,39 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
                                    core::HsaEventCallback event_callback, void* data,
                                    uint32_t private_segment_size, uint32_t group_segment_size,
                                    core::Queue** queue) {
+  const bool dev_mem_queue_descriptor =
+      (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0;
+  const bool pm4_queue = (flags & HSA_AMD_QUEUE_CREATE_HSA_QUEUE_COMPUTE_PM4) != 0;
+  const std::size_t shared_queue_size =
+      pm4_queue ? PM4Queue::shared_queue_size_ : AqlQueue::shared_queue_size_;
+
+  // Create an HW AQL queue
+  core::SharedQueue* shared_queue = nullptr;
+
+  if (dev_mem_queue_descriptor) {
+    shared_queue = static_cast<core::SharedQueue*>(
+        finegrain_allocator()(shared_queue_size, core::MemoryRegion::AllocateUncached));
+  } else {
+    shared_queue =
+        static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
+            shared_queue_size, MemoryRegion::GetPageSize(),
+            isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged) : 0,
+            node_id()));
+  }
+
+  if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  if (pm4_queue) {
+    PM4Queue* pm4_queue = nullptr;
+    try {
+      pm4_queue = new PM4Queue(shared_queue, *this, node_id(), flags);
+      *queue = pm4_queue;
+    } catch (const hsa_exception& e) {
+      return e.error_code();
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
   // Handle GWS queues.
   if (queue_type == HSA_QUEUE_TYPE_COOPERATIVE) {
     ScopedAcquire<KernelMutex> lock(&gws_queue_.lock_);
@@ -1754,24 +1788,6 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
   // Deferring longer risks exhausting queue count before ISA upload and invalidation capability is
   // ensured.
   queues_[QueueUtility].touch();
-
-  bool dev_mem_queue_descriptor = (flags & HSA_AMD_QUEUE_CREATE_DEVICE_MEM_QUEUE_DESCRIPTOR) != 0;
-
-  // Create an HW AQL queue
-  core::SharedQueue* shared_queue = nullptr;
-
-  if (dev_mem_queue_descriptor) {
-    shared_queue = static_cast<core::SharedQueue*>(
-        finegrain_allocator()(AqlQueue::shared_queue_size_, core::MemoryRegion::AllocateUncached));
-  } else {
-    shared_queue =
-        static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
-            AqlQueue::shared_queue_size_, MemoryRegion::GetPageSize(),
-            isMES() ? (MemoryRegion::AllocateGTTAccess | MemoryRegion::AllocateNonPaged) : 0,
-            node_id()));
-  }
-
-  if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
   auto aql_queue = new AqlQueue(shared_queue, this, size, node_id(), scratch, event_callback, data,
                                 flags);
