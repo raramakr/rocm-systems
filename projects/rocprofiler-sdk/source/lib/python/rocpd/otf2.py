@@ -26,11 +26,44 @@
 from .importer import RocpdImportData
 from .time_window import apply_time_window
 from . import output_config
-from . import libpyrocpd
+from .otf2_writer import write_otf2 as py_write_otf2
 
 
 def write_otf2(importData, config):
-    return libpyrocpd.write_otf2(importData, config)
+    py_write_otf2(importData, config)
+
+    # Read back the written OTF2 file and print its contents
+    # from pathlib import Path
+    # import importlib.util
+    # import os
+
+    # otf2_reader_path = os.path.join(
+    #    os.path.dirname(__file__),
+    #    "..",
+    #    "..",
+    #    "..",
+    #    "..",
+    #    "tests",
+    #    "pytest-packages",
+    #    "rocprofiler_sdk",
+    #    "pytest_utils",
+    #    "otf2_reader.py",
+    # )
+    # otf2_reader_path = os.path.abspath(otf2_reader_path)
+    # spec = importlib.util.spec_from_file_location("otf2_reader", otf2_reader_path)
+    # otf2_reader = importlib.util.module_from_spec(spec)
+    # spec.loader.exec_module(otf2_reader)
+    # OTF2Reader = otf2_reader.OTF2Reader
+
+    # trace_dir = getattr(config, "output_path", "./otf_traces")
+    # trace_file = f"{getattr(config, "output_file", "traces")}_results"
+    # otf2_path = f"{trace_dir}/{trace_file}.otf2"
+    ## Read and print contents
+    # import pdb
+
+    # pdb.set_trace()
+    # df, _ = OTF2Reader(otf2_path).read()
+    # print(f"\nOTF2Reader DataFrame:\n{df}")
 
 
 def execute(input, config=None, window_args=None, **kwargs):

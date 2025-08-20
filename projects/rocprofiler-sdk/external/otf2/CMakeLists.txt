@@ -59,9 +59,9 @@ externalproject_add(
     CONFIGURE_COMMAND
         ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
         <SOURCE_DIR>/configure -q --enable-silent-rules --prefix=${_otf2_root}
-        --libdir=${_otf2_root}/${CMAKE_INSTALL_LIBDIR} CFLAGS=-fPIC\ -O3\ -g
-        CXXFLAGS=-fPIC\ -O3\ -g LDFLAGS= PYTHON=: SPHINX=:
-    BUILD_COMMAND ${MAKE_COMMAND} install -s
+        --libdir=${_otf2_root}/${CMAKE_INSTALL_LIBDIR} CFLAGS=-fPIC\ -O0\ -g
+        CXXFLAGS=-fPIC\ -O0\ -g LDFLAGS= PYTHON=: SPHINX=:
+    BUILD_COMMAND ${MAKE_COMMAND} install
     BUILD_BYPRODUCTS "${_otf2_build_byproducts}"
     INSTALL_COMMAND "")
 

@@ -153,6 +153,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         __main__.py
         output_config.py
         otf2.py
+        otf2_writer.py
         pftrace.py
         query.py
         schema.py
