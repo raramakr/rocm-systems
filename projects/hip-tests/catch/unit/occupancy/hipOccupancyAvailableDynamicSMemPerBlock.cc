@@ -69,7 +69,7 @@ TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative") {
   int blockSize = 1024;
   SECTION("Invalid driver funtion") {
     HIP_CHECK_ERROR(
-        hipOccupancyAvailableDynamicSMemPerBlock(&dynamicSmemSize, nullptr, numBlocks, blockSize),
+        hipOccupancyAvailableDynamicSMemPerBlock(&dynamicSmemSize, NULL, numBlocks, blockSize),
         hipErrorInvalidDeviceFunction);
   }
 
