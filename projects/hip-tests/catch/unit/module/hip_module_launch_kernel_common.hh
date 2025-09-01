@@ -238,7 +238,7 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParamet
       hipStream_t s1;
       HIP_CHECK(hipStreamCreate(&s1));
       HIP_CHECK(hipSetDevice(0));
-      hipFunction_t f = GetKernel(mg.module(), "Kernel42");
+      hipFunction_t f = GetKernel(GetModule(), "Kernel42");
       void* extra[0] = {};
       HIP_CHECK_ERROR(func(f, 1, 1, 1, 1, 1, 1, 0, s1, nullptr, extra, nullptr, nullptr, 0u),
                       hipErrorInvalidResourceHandle);
