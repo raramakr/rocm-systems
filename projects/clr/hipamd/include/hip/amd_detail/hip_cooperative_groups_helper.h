@@ -189,6 +189,11 @@ __CG_STATIC_QUALIFIER__ void sync() { __ockl_grid_sync(); }
 __CG_STATIC_QUALIFIER__ unsigned int barrier_signal() { return __ockl_grid_bar_arrive(); }
 
 __CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
+
+__CG_STATIC_QUALIFIER__ dim3 grid_dim() {
+  return (dim3(static_cast<__hip_uint32_t>(gridDim.x), static_cast<__hip_uint32_t>(gridDim.y),
+               static_cast<__hip_uint32_t>(gridDim.z)));
+}
 }  // namespace grid
 
 /**
