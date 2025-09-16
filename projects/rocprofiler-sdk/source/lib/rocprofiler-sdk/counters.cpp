@@ -242,6 +242,10 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
         return true;
     };
 
+    auto spm_info = [&](auto& out_struct) {
+        const auto* metric_ptr = common::get_val(id_map, counter_id.handle);
+        out_struct.is_spm      = metric_ptr->spm();
+    };
     switch(version)
     {
         case ROCPROFILER_COUNTER_INFO_VERSION_0:
@@ -259,6 +263,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
             if(!base_info(_out_struct)) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
             if(!dim_info(_out_struct)) return ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND;
             if(!dim_permutations(_out_struct)) return ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND;
+            spm_info(_out_struct);
 
             return ROCPROFILER_STATUS_SUCCESS;
         }

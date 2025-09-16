@@ -26,8 +26,10 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <cstdint>
 
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -71,16 +73,14 @@ build_pack(spm_parameter_pack&          pack,
     const auto* agent = rocprofiler::agent::get_agent(agent_id);
     if(!agent) return false;
 
-    const auto* metricset = rocprofiler::counters::getSupportedSPMCounters(agent_id);
-    const auto& id_map    = rocprofiler::counters::loadMetrics()->id_to_metric;
+    const auto& id_map = rocprofiler::counters::loadMetrics()->id_to_metric;
 
     for(size_t i = 0; i < counters_count; i++)
     {
         // Check for unsupported metrics
-        if(metricset->find(counters_list[i].handle) == metricset->end()) return false;
-
         auto it = id_map.find(counters_list[i].handle);
         if(it == id_map.end()) return false;
+        if(!it->second.spm()) return false;
         pack.metrics.push_back(it->second);
     }
 
@@ -206,17 +206,17 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t              a
                                            void*                               user_data)
 {
     if(!rocprofiler::SPM::is_dlsym_valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+    auto agent = rocprofiler::agent::get_agent(agent_id);
+    if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
-    if(!rocprofiler::agent::get_agent(agent_id)) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+    auto       metrics_map = rocprofiler::counters::loadMetrics()->arch_to_metric;
+    const auto metrics     = metrics_map.at(agent->name);
 
-    const auto* id_set = rocprofiler::counters::getSupportedSPMCounters(agent_id);
-    if(id_set->empty()) return ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED;
+    auto ids = std::vector<rocprofiler_counter_id_t>{};
+    for(auto m : metrics)
+        if(m.spm()) ids.push_back({.handle = m.id()});
 
-    std::vector<rocprofiler_counter_id_t> ids{};
-    ids.reserve(id_set->size());
-
-    for(auto id : *id_set)
-        ids.push_back(rocprofiler_counter_id_t{.handle = id});
+    if(ids.empty()) return ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED;
 
     return cb(agent_id, ids.data(), ids.size(), user_data);
 }

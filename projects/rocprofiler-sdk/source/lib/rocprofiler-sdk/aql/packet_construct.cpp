@@ -205,8 +205,9 @@ SPMPacketFactory::SPMPacketFactory(const rocprofiler_agent_t& agent,
 
         aqlprofile_pmc_event_t event{};
         event.block_name = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id);
-        event.event_id   = std::atoi(metric.event().c_str());
-        event.flags      = aqlprofile_pmc_event_flags_t{metric.flags()};
+        event.event_id =
+            static_cast<uint32_t>(std::stoul(metric.event().c_str(), nullptr) & 0xFFFFFFFF);
+        event.flags = aqlprofile_pmc_event_flags_t{metric.flags()};
 
         for(unsigned block_index = 0; block_index < query_info.instance_count; ++block_index)
         {

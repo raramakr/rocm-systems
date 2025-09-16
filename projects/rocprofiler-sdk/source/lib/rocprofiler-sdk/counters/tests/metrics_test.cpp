@@ -236,7 +236,7 @@ TEST(metrics, check_public_api_query)
         EXPECT_EQ(std::string(info.expression ? info.expression : ""), metric.expression());
         EXPECT_EQ(info.is_derived, !metric.expression().empty());
         EXPECT_EQ(std::string(info.description ? info.description : ""), metric.description());
-
+        EXPECT_EQ(info.is_spm, metric.spm());
         EXPECT_EQ(info.dimensions_count, dims->size());
         for(size_t i = 0; i < info.dimensions_count; i++)
         {

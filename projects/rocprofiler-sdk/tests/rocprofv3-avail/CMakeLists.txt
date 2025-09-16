@@ -16,7 +16,7 @@ set(PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 add_test(NAME rocprofv3-avail-test-hw-counters
          COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail>
-                 info --pmc)
+                 info --pmc --spm)
 
 add_test(NAME rocprofv3-avail-test-pc-sample-config
          COMMAND ${Python3_EXECUTABLE} $<TARGET_FILE:rocprofiler-sdk::rocprofv3-avail>
