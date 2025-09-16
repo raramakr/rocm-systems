@@ -215,7 +215,6 @@
         "Unit_tex2DLayeredLod_Positive_ReadModeNormalizedFloat - unsigned char",
         "Unit_tex2DLayeredLod_Positive_ReadModeNormalizedFloat - short",
         "Unit_tex2DLayeredLod_Positive_ReadModeNormalizedFloat - unsigned short",
-        "Unit_hipLaunchKernel_Negative_Parameters",
         "Unit_Assert_Positive_Basic_KernelFail",
         "=== Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210 ===",
         "Unit_hipMemImportFromShareableHandle_Positive_MultiProc",
