@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 15
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 16
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1104,6 +1104,8 @@ typedef hipError_t (*t_hipLibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t l
                                             const char* name);
 typedef hipError_t (*t_hipLibraryGetKernelCount)(unsigned int *count,
                                                  hipLibrary_t library);
+typedef hipError_t (*t_hipGetProcAddress_spt)(const char* symbol, void** pfn, int hipVersion, uint64_t flags,
+                                              hipDriverProcAddressQueryResult* symbolStatus);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1679,8 +1681,11 @@ struct HipDispatchTable {
   t_hipLibraryGetKernel hipLibraryGetKernel_fn;
   t_hipLibraryGetKernelCount hipLibraryGetKernelCount_fn;
 
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 16
+  t_hipGetProcAddress_spt hipGetProcAddress_spt_fn;
+
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 15
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 17
 
   // ******************************************************************************************* //
   //

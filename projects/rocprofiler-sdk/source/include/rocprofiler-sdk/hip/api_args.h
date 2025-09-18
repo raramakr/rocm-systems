@@ -3324,6 +3324,16 @@ typedef union rocprofiler_hip_api_args_t
         hipLibrary_t  library;
     } hipLibraryGetKernelCount;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 16
+    struct
+    {
+        const char*                      symbol;
+        void**                           pfn;
+        int                              hipVersion;
+        uint64_t                         flags;
+        hipDriverProcAddressQueryResult* symbolStatus;
+    } hipGetProcAddress_spt;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI
