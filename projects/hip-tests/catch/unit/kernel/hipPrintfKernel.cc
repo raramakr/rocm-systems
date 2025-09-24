@@ -23,7 +23,7 @@ THE SOFTWARE.
 
 #define HIP_ENABLE_PRINTF
 
-__global__ void run_printf() { printf("Hello World\n"); }
+__global__ void run_printf() { printf("Hello World"); }
 /**
 * @addtogroup hipLaunchKernelGGL
 * @{
@@ -47,22 +47,22 @@ __global__ void run_printf() { printf("Hello World\n"); }
  */
 TEST_CASE("Unit_kernel_ChkPrintf") {
   int device_count = 0;
-  CaptureStream capture(stdout);
   HIP_CHECK(hipGetDeviceCount(&device_count));
-  std::string st = "Hello World";
-  const char* check = st.c_str();
+  std::string check = "Hello World";
   for (int i = 0; i < device_count; ++i) {
     HIP_CHECK(hipSetDevice(i));
     if (!HipTest::isPcieAtomicSupported()) continue;
+
+    CaptureStream capture;
+    capture.BeginCapture();
     hipLaunchKernelGGL(run_printf, dim3(1), dim3(1), 0, 0);
     HIP_CHECK(hipDeviceSynchronize());
-    char* data = new char[st.size()];
-    ;
-    std::ifstream CapturedData = capture.getCapturedData();
-    CapturedData.getline(data, st.size() + 1);
-    int result = strcmp(data, check);
+    capture.EndCapture();
+
+
+    auto CapturedData = capture.GetCaptureData();
+    int result = check.compare(CapturedData);
     REQUIRE(result == 0);
-    delete[] data;
   }
 }
 
