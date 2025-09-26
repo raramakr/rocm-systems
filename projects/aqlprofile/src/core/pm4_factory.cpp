@@ -21,10 +21,12 @@
 // THE SOFTWARE.
 
 #include "pm4_factory.h"
+#include "logger.h"
 
 #include <cstring>
 #include <mutex>
 #include <shared_mutex>
+#include <stdexcept>
 
 namespace aql_profile {
 namespace {
@@ -58,14 +60,20 @@ aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_
   // Update size to new size
   static_assert(sizeof(aqlprofile_agent_info_v1_t) == 40);
 
-  aqlprofile_agent_handle_t agent_id {};
-  AgentInfo int_agent_info {};
-  int_agent_info.cu_num = agent_info->cu_num;
-  int_agent_info.se_num = agent_info->se_num;
-  int_agent_info.xcc_num = agent_info->xcc_num;
-  int_agent_info.shader_arrays_per_se = agent_info->shader_arrays_per_se;
-  int_agent_info.domain = agent_info->domain;
-  int_agent_info.bdf_id = agent_info->location_id;
+  aqlprofile_agent_handle_t agent_id{};
+  AgentInfo int_agent_info{};
+
+  if (agent_info->size == 40) {
+    int_agent_info.cu_num = agent_info->cu_num;
+    int_agent_info.se_num = agent_info->se_num;
+    int_agent_info.xcc_num = agent_info->xcc_num;
+    int_agent_info.shader_arrays_per_se = agent_info->shader_arrays_per_se;
+    int_agent_info.domain = agent_info->domain;
+    int_agent_info.bdf_id = agent_info->location_id;
+  } else {
+    ERR_LOGGING << "Unsupported agent_info size " << agent_info->size;
+    throw std::runtime_error("Unsupported agent_info size");
+  }
 
   static_assert(sizeof(int_agent_info.name) == 64);
 
