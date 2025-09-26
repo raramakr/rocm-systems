@@ -180,7 +180,8 @@ typedef struct {
  * to the describe the agent to profile. Information can be obtained either from HSA
  * (if loaded) or the KFD topology.
  */
-typedef struct {
+typedef struct aqlprofile_agent_info_v1_t {
+  uint64_t size; /**< Size of this structure */
   const char* agent_gfxip; /**< Agent GFXIP (HSA_AGENT_INFO_NAME or KFD.product_name) */
   uint32_t xcc_num;        /**< XCC's on the agent (HSA_AMD_AGENT_INFO_NUM_XCC or KFD.num_xcc) */
   uint32_t se_num;         /**< SE's on the agent (HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES or
