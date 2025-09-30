@@ -392,7 +392,7 @@ class coalesced_group : public thread_group {
       unsigned int masklength =
           min(static_cast<unsigned int>(num_threads()) - base_offset, tile_size);
       lane_mask full_mask = (static_cast<int>(warpSize) == 32)
-                                ? static_cast<lane_mask>((1u << 32) - 1)
+                                ? static_cast<lane_mask>((1ull << 32) - 1)
                                 : static_cast<lane_mask>(-1ull);
       lane_mask member_mask = full_mask >> (warpSize - masklength);
 
