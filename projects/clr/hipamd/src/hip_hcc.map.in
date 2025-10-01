@@ -639,6 +639,7 @@ global:
     hipLibraryGetKernel;
     hipLibraryGetKernelCount;
     hipStreamCopyAttributes;
+    hipKernelGetAttribute;
 local:
     *;
 } hip_7.1;

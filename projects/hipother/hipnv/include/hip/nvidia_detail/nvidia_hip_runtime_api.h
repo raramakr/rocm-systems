@@ -3669,6 +3669,11 @@ inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrar
   return hipCUResultTohipError(cuLibraryGetKernelCount(count, library));
 }
 
+inline static hipError_t hipKernelGetAttribute(int* pi, hipFuncAttribute attrib, hipKernel_t kernel,
+                                               hipDevice_t dev) {
+  return hipCUResultTohipError(cuKernelGetAttribute(pi, attrib, kernel, dev));
+}
+
 inline static hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
                                          dim3 dimBlocks, void** args, size_t sharedMemBytes,
                                          hipStream_t stream) {
