@@ -919,10 +919,17 @@ hsa_status_t Runtime::InteropMap(uint32_t num_agents, Agent** agents,
 }
 
 hsa_status_t Runtime::InteropUnmap(void* ptr) {
+  ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
+  const auto& it = allocation_map_.find(ptr);
+  if (it == allocation_map_.end())
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
   if(HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(ptr))!=HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return HSA_STATUS_ERROR_RESOURCE_FREE;
   if(HSAKMT_CALL(hsaKmtDeregisterMemory(ptr))!=HSAKMT_STATUS_SUCCESS)
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    return HSA_STATUS_ERROR_RESOURCE_FREE;
+
+  allocation_map_.erase(it);
   return HSA_STATUS_SUCCESS;
 }
 
