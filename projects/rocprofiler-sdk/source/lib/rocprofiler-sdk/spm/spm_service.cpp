@@ -22,8 +22,9 @@
 
 #include <glog/logging.h>
 #include <hsa/hsa_api_trace.h>
-#include <rocprofiler-sdk/experimental/spm/capture.h>
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <cstdint>
 
 #include "lib/common/utility.hpp"
@@ -45,123 +46,106 @@ is_dlsym_valid()
     static bool valid = Dlsym().valid();
     return valid;
 }
+}
+}
+extern "C" {
 
-bool
-build_pack(spm_parameter_pack&          pack,
-           rocprofiler_agent_id_t       agent_id,
-           rocprofiler_spm_parameter_t* parameters,
-           size_t                       parameter_count,
-           rocprofiler_counter_id_t*    counters_list,
-           size_t                       counters_count)
+/**
+ * @brief Create Profile Configuration.
+ *
+ * @param [in] agent Agent identifier
+ * @param [in] counters_list List of GPU counters
+ * @param [in] counters_count Size of counters list
+ * @param [in/out] config_id Identifier for GPU counters group. If an existing
+                   profile is supplied, that profiles counters will be copied
+                   over to a new profile (returned via this id).
+ * @return ::rocprofiler_status_t
+ */
+rocprofiler_status_t
+rocprofiler_spm_create_counter_config(rocprofiler_agent_id_t       agent_id,
+                                  rocprofiler_counter_id_t*        counters_list,
+                                  size_t                           counters_count,
+                                  rocprofiler_spm_parameter_t*     parameters,
+                                  size_t                           parameter_count,
+                                  rocprofiler_spm_counter_config_id_t* config_id)
 {
-    for(size_t p = 0; p < parameter_count; p++)
-    {
-        const rocprofiler_spm_parameter_t& param = parameters[p];
+    std::unordered_set<uint64_t> already_added;
+    const auto*                  agent = ::rocprofiler::agent::get_agent(agent_id);
+    if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
-        switch(param.type)
-        {
-            case ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS: pack.timeout = param.value; break;
-            case ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE: pack.buffer_size = param.value; break;
-            case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_FREQUENCY:
-                pack.sample_freq = param.value;
-                break;
-            case ROCPROFILER_SPM_PARAMETER_TYPE_LAST: return false;
-            default: return false;
-        }
-    }
+    std::shared_ptr<rocprofiler::SPM::spm_counter_config> config =
+        std::make_shared<rocprofiler::SPM::spm_counter_config>();
 
-    const auto* agent = rocprofiler::agent::get_agent(agent_id);
-    if(!agent) return false;
-
-    const auto& id_map = rocprofiler::counters::loadMetrics()->id_to_metric;
+    auto        metrics_map = rocprofiler::counters::loadMetrics();
+    const auto& id_map      = metrics_map->id_to_metric;
 
     for(size_t i = 0; i < counters_count; i++)
     {
-        // Check for unsupported metrics
-        auto it = id_map.find(counters_list[i].handle);
-        if(it == id_map.end()) return false;
-        if(!it->second.spm()) return false;
-        pack.metrics.push_back(it->second);
+        auto& counter_id = counters_list[i];
+
+        const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle);
+        if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
+        // Don't add duplicates
+        if(!already_added.emplace(metric_ptr->id()).second) continue;
+
+        if(!rocprofiler::counters::checkValidMetric(std::string(agent->name), *metric_ptr)
+          || ! metric_ptr->spm())
+        {
+            return ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT;
+        }
+        config->metrics.push_back(*metric_ptr);
+       
+    }
+    for(size_t i = 0; i <  parameter_count; i++)
+    {
+        switch(parameters[i].type)
+        {
+            case ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS: config->timeout = parameters[i].value; break;
+            case ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE: config->buffer_size = parameters[i].value; break;
+            case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_FREQUENCY:
+              config->sample_freq = parameters[i].value;
+                break;
+            default: break;
+        }
+    }
+    
+    if(config_id->handle != 0)
+    {
+        // Copy existing counters from previous config
+        if(auto existing = rocprofiler::SPM::get_spm_counter_config(*config_id))
+        {
+            for(const auto& metric : existing->metrics)
+            {
+                if(!already_added.emplace(metric.id()).second) continue;
+                config->metrics.push_back(metric);
+            }
+        }
     }
 
-    if(!pack.valid()) return false;
-
-    auto pool        = hsa::SPMMemoryPool{};
-    pool.allocate_fn = [](hsa_amd_memory_pool_t, size_t size, uint32_t, void** ptr) {
-        *ptr = malloc(size);
-        return HSA_STATUS_SUCCESS;
-    };
-    pool.allow_access_fn = [](uint32_t, const hsa_agent_t*, const uint32_t*, const void*) {
-        return HSA_STATUS_SUCCESS;
-    };
-    pool.free_fn = [](void* ptr) {
-        free(ptr);
-        return HSA_STATUS_SUCCESS;
-    };
-    pool.fill_fn = [](void* ptr, uint32_t value, size_t size) {
-        memset(ptr, value, size * sizeof(uint32_t));
-        return HSA_STATUS_SUCCESS;
-    };
-    pool.api_copy_fn = [](void* dst, const void* src, size_t size) {
-        memcpy(dst, src, size);
-        return HSA_STATUS_SUCCESS;
-    };
-
-    aql::SPMPacketFactory factory(*agent, pack, pool);
-    auto                  packet = factory.construct();
-
-    return packet != nullptr;
-}
-};  // namespace SPM
-};  // namespace rocprofiler
-
-extern "C" {
-rocprofiler_status_t
-rocprofiler_configure_spm_agent_service(rocprofiler_context_id_t        context_id,
-                                        rocprofiler_agent_id_t          agent_id,
-                                        rocprofiler_counter_id_t*       counters_list,
-                                        size_t                          counters_count,
-                                        rocprofiler_spm_parameter_t*    parameters,
-                                        size_t                          parameter_count,
-                                        rocprofiler_spm_data_callback_t data_fn,
-                                        rocprofiler_user_data_t         user_data)
-{
-    if(rocprofiler::registration::get_init_status() > -1)
-        return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
-
-    auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
-    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
-
-    if(!data_fn) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if(!rocprofiler::SPM::is_dlsym_valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
-
-    if(!ctx->agent_spm) ctx->agent_spm = std::make_unique<rocprofiler::SPM::SPMAgentManager>();
-
-    auto pack      = rocprofiler::SPM::spm_parameter_pack{};
-    pack.data_fn   = data_fn;
-    pack.user_data = user_data;
-
-    if(!rocprofiler::SPM::build_pack(
-           pack, agent_id, parameters, parameter_count, counters_list, counters_count))
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if(!ctx->agent_spm->add_agent(agent_id, pack))
-        return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+    config->agent = agent;
+    if(auto status = rocprofiler::SPM::create_spm_counter_profile(config);
+       status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        return status;
+    }
+    *config_id = config->id;
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
+rocprofiler_spm_destroy_counter_config(rocprofiler_spm_counter_config_id_t config_id)
+{
+    rocprofiler::SPM::destroy_spm_counter_profile(config_id.handle);
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
 rocprofiler_configure_spm_dispatch_service(rocprofiler_context_id_t            context_id,
-                                           rocprofiler_agent_id_t              agent_id,
-                                           rocprofiler_counter_id_t*           counters_list,
-                                           size_t                              counters_count,
-                                           rocprofiler_spm_parameter_t*        parameters,
-                                           size_t                              parameter_count,
-                                           rocprofiler_spm_dispatch_callback_t dispatch_fn,
-                                           rocprofiler_spm_data_callback_t     data_fn,
-                                           void*                               config_userdata)
+                                           rocprofiler_spm_dispatch_counting_service_cb_t dispatch_callback,
+                                           void*                                      dispatch_callback_args,
+                                           rocprofiler_spm_dispatch_counting_record_cb_t record_callback,
+                                           void*                                      record_callback_args)
 {
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
@@ -169,26 +153,12 @@ rocprofiler_configure_spm_dispatch_service(rocprofiler_context_id_t            c
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
-    if(!data_fn || !dispatch_fn) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    if(!dispatch_callback || !record_callback) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     if(!rocprofiler::SPM::is_dlsym_valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
 
-    if(!ctx->dispatch_spm)
-        ctx->dispatch_spm = std::make_unique<rocprofiler::SPM::SPMDispatchManager>();
-
-    auto pack = rocprofiler::SPM::spm_parameter_pack{};
-
-    pack.data_fn         = data_fn;
-    pack.dispatch_fn     = dispatch_fn;
-    pack.config_userdata = config_userdata;
-
-    if(!rocprofiler::SPM::build_pack(
-           pack, agent_id, parameters, parameter_count, counters_list, counters_count))
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    if(!ctx->dispatch_spm->add_agent(agent_id, pack))
-        return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
-
+    rocprofiler::SPM::configure_spm_dispatch(context_id, dispatch_callback, dispatch_callback_args, record_callback, record_callback_args);
+   
     return ROCPROFILER_STATUS_SUCCESS;
 }
 

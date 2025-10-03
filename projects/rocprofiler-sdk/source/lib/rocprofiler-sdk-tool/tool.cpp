@@ -265,6 +265,7 @@ auto*      tool_metadata     = as_pointer<tool::metadata>(tool::metadata::inproc
 auto       target_kernels    = common::Synchronized<targeted_kernels_map_t>{};
 auto*      execution_profile = as_pointer<common::Synchronized<tool::execution_profile_data>>();
 auto       counter_collection_ctx = rocprofiler_context_id_t{0};
+auto       spm_collection_ctx = rocprofiler_context_id_t{0};
 std::mutex att_shader_data;
 
 thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
@@ -1482,30 +1483,77 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
         tool::write_ring_buffer(counter_record, domain_type::COUNTER_COLLECTION);
     }
 }
+std::optional<rocprofiler_spm_counter_config_id_t>
+get_spm_config(rocprofiler_agent_id_t agent_id)
+{
+    static const auto gpu_agents_counter_info = get_agent_counter_info();
+    static auto agent_configs = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_spm_counter_config_id_t>{};
+    
+    auto itr = agent_configs.find(agent_id);
+    if(itr != agent_configs.end()) return itr->second; 
+    
+    auto params = std::vector<rocprofiler_spm_parameter_t>{};
+    params.push_back(
+            {ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, tool::get_config().spm_timeout_ms});
+    params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE,
+                          tool::get_config().spm_buffer_size * 1024});
+    params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_FREQUENCY,
+                          tool::get_config().spm_frequency_sclk});
+    auto expected_counters = std::vector<rocprofiler_counter_id_t>{};
+    
+    for(const auto& citr : gpu_agents_counter_info.at(agent_id))
+    {   
+
+        for(auto desired_counter : rocprofiler::tool::get_config().spm_counters)
+        {
+                    if(std::string_view{desired_counter} == std::string_view{citr.name})
+                        expected_counters.emplace_back(citr.id);
+                
+        }
+    }
+    auto config = rocprofiler_spm_counter_config_id_t{};
+    ROCPROFILER_CALL(rocprofiler_spm_create_counter_config(agent_id,
+                                  expected_counters.data(),
+                                  expected_counters.size(),
+                                  params.data(),
+                                  params.size(),
+                                  &config), "SPM could not be configured");
+    agent_configs.emplace(agent_id, config);
+    return config;
+}
 
 int
-spm_dispatch_callback(rocprofiler_agent_id_t /**/,
-                      rocprofiler_queue_id_t /* queue_id */,
-                      rocprofiler_kernel_id_t   kernel_id,
-                      rocprofiler_dispatch_id_t dispatch_id,
-                      void* /* config_userdata */,
-                      rocprofiler_user_data_t* userdata)
+spm_dispatch_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_data,
+    rocprofiler_spm_counter_config_id_t*         config,
+    rocprofiler_user_data_t*                     user_data,
+    void*                                       /*callback_data_args*/)
 {
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
-
-    if(!is_targeted_kernel(kernel_id, kernel_iteration))
+    auto userdata = static_cast<rocprofiler_user_data_t*>(user_data);
+    if(!is_targeted_kernel(dispatch_data.dispatch_info.kernel_id, kernel_iteration))
     {
         return 0;
     }
-    userdata->value = dispatch_id;
+    else if(auto profile = get_spm_config(dispatch_data.dispatch_info.agent_id))
+    {
+        *config          = *profile;
+        userdata->value = common::get_tid();
+    }
+    for(auto agent : get_gpu_agents())
+    {
+        if(agent->id == dispatch_data.dispatch_info.agent_id && agent->gpu_index !=0)
+          return 0;
+    }
     return 1;
 }
 
 void
-spm_data_callback(rocprofiler_spm_counter_record_t* records,
-                  size_t                            record_count,
-                  uint8_t                           flags,
-                  rocprofiler_user_data_t           userdata)
+spm_data_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_data,
+    rocprofiler_spm_counter_record_t* records,
+    size_t                            record_count,
+    uint8_t                           flags,
+    rocprofiler_user_data_t*          user_data, 
+    void*                          /* record_callback_args*/ )
 {
     auto lk = std::shared_lock{tool_metadata->spm_mut};
     if(record_count == 0) return;
@@ -1513,18 +1561,22 @@ spm_data_callback(rocprofiler_spm_counter_record_t* records,
     if(flags >> ROCPROFILER_SPM_RECORD_FLAG_DATA)
     {
         auto counter_record        = tool::tool_spm_counter_record_t{};
-        counter_record.dispatch_id = userdata.value;
+        counter_record.dispatch_data = dispatch_data;
+        counter_record.thread_id = user_data->value;
         auto serialized_records    = std::vector<tool::tool_spm_counter_value_t>{};
         for(size_t count = 0; count < record_count; count++)
         {
             auto _counter_id = rocprofiler_counter_id_t{};
+            size_t dim_pos = 0; 
             ROCPROFILER_CALL(rocprofiler_query_record_counter_id(records[count].id, &_counter_id),
                              "query record counter id");
+            ROCPROFILER_CALL(rocprofiler_query_record_dimension_position(records[count].id, 0,
+                                        &dim_pos), "query dimension pos"); 
             serialized_records.emplace_back(
                 tool::tool_spm_counter_value_t{_counter_id,
+                                               dim_pos,
                                                records[count].value,
-                                               records[count].timestamp,
-                                               records[count].agent_id});
+                                               records[count].timestamp});
         }
 
         if(!serialized_records.empty())
@@ -1536,7 +1588,7 @@ spm_data_callback(rocprofiler_spm_counter_record_t* records,
 
     if(flags & ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST)
     {
-        ROCP_CI_LOG(WARNING) << " Dispatch_id:" << userdata.value;
+        ROCP_CI_LOG(WARNING) << " Dispatch_id:" << dispatch_data.dispatch_info.dispatch_id;
     }
 }
 rocprofiler_client_finalize_t client_finalizer  = nullptr;
@@ -2142,41 +2194,20 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     if(tool::get_config().spm_counter_collection)
     {
-        static const auto gpu_agents_counter_info = get_agent_counter_info();
-
-        auto params = std::vector<rocprofiler_spm_parameter_t>{};
-        params.push_back(
-            {ROCPROFILER_SPM_PARAMETER_TYPE_TIMEOUT_MS, tool::get_config().spm_timeout_ms});
-        params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_BUFFER_SIZE,
-                          tool::get_config().spm_buffer_size * 1024});
-        params.push_back({ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_FREQUENCY,
-                          tool::get_config().spm_frequency_sclk});
-
-        for(auto agent : get_gpu_agents())
-        {
-            if(agent->gpu_index != 0) continue;
-
-            std::vector<rocprofiler_counter_id_t> expected_counters;
-
-            for(const auto& citr : gpu_agents_counter_info.at(agent->id))
-            {
-                for(auto desired_counter : rocprofiler::tool::get_config().spm_counters)
-                {
-                    if(std::string_view{desired_counter} == std::string_view{citr.name})
-                        expected_counters.emplace_back(citr.id);
-                }
-            }
-            ROCPROFILER_CALL(rocprofiler_configure_spm_dispatch_service(get_client_ctx(),
-                                                                        agent->id,
-                                                                        expected_counters.data(),
-                                                                        expected_counters.size(),
-                                                                        params.data(),
-                                                                        params.size(),
+       
+       
+            ROCPROFILER_CALL(rocprofiler_create_context(&spm_collection_ctx),
+                         "failed to create counter collection context");
+                        
+            ROCPROFILER_CALL(rocprofiler_configure_spm_dispatch_service(spm_collection_ctx,
                                                                         spm_dispatch_callback,
+                                                                        nullptr,
                                                                         spm_data_callback,
                                                                         nullptr),
                              "Could not setup SPM counting service");
-        }
+        
+        
+        start_context(spm_collection_ctx, "counter collection");
     }
 
     auto rename_ctx            = rocprofiler_context_id_t{0};

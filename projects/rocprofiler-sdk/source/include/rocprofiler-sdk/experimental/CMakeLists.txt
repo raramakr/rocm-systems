@@ -6,4 +6,4 @@ install(
     COMPONENT development)
 
 add_subdirectory(thread-trace)
-add_subdirectory(spm)
+

@@ -26,7 +26,6 @@
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/spm/spm_core.hpp"
 #include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
@@ -128,23 +127,41 @@ private:
     hsa::TraceMemoryPool tracepool;
 };
 
-class SPMPacketFactory
+class SPMPacketConstruct
 {
-    using parameter_pack = SPM::spm_parameter_pack;
-
+  
 public:
-    SPMPacketFactory(const rocprofiler_agent_t& agent,
-                     const parameter_pack&      pack,
-                     const hsa::SPMMemoryPool&  _pool);
+    SPMPacketConstruct(const rocprofiler_agent_id_t agent_id,
+                      const std::vector<counters::Metric>& metrics,
+                      uint64_t sample_freq,
+                      uint64_t buffer_size,
+                      uint64_t timeout,
+                      const hsa::SPMMemoryPool&  pool);
 
-    std::unique_ptr<hsa::SPMPacket>          construct();
-    std::vector<SPM::spm_counter_instance_t> id_map{};
+    std::unique_ptr<hsa::SPMPacket> construct_packet(const CoreApiTable&,
+                                                            const AmdExtTable&, 
+    rocprofiler_spm_dispatch_counting_service_data_t dispatch_data,
+    rocprofiler_spm_dispatch_counting_record_cb_t record_callback,
+    rocprofiler_user_data_t* user_data,
+    void* record_callback_args);
+    rocprofiler_status_t can_collect();
+
+protected:
+    struct AQLProfileMetric
+    {
+        counters::Metric                    metric;
+        std::vector<aqlprofile_pmc_event_t> instances;
+        std::vector<aqlprofile_pmc_event_t> events;
+    };
 
 private:
-    rocprofiler_agent_id_t                  agent_id{};
+    rocprofiler_agent_id_t                 _agent_id{};
+    std::vector<SPM::spm_counter_instance_t> id_map{};
+    std::vector<AQLProfileMetric>           _metrics;
     std::vector<aqlprofile_pmc_event_t>     events{};
     std::vector<aqlprofile_spm_parameter_t> params{};
     hsa::SPMMemoryPool                      _pool{};
+   
 };
 
 }  // namespace aql

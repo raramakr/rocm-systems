@@ -266,6 +266,7 @@ SPMPacket::SPMPacket(const aqlprofile_spm_profile_t& profile, rocprofiler_agent_
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to query SPM buffer_num";
 
     is_valid = true;
+    empty  = false;
 }
 
 void
@@ -309,9 +310,9 @@ SPMPacket::kfd_stop()
     else
         ROCP_WARNING << "Double call to KFD stop!";
 
-    ROCP_FATAL_IF(!decode_data_fn) << " decode data_fn null";
+    ROCP_FATAL_IF(!record_cb) << " decode data_fn null";
 
-    this->decode_data_fn(nullptr, 0, 1 << ROCPROFILER_SPM_RECORD_FLAG_END, user_data);
+    //this->record_cb({}, 0, 1 << ROCPROFILER_SPM_RECORD_FLAG_END, user_data);
 }
 
 SPMPacket::~SPMPacket()

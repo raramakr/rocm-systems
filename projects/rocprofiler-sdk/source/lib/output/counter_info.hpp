@@ -119,7 +119,8 @@ struct tool_spm_counter_value_t
     rocprofiler_counter_id_t id        = {};
     uint64_t                 value     = 0;
     rocprofiler_timestamp_t  timestamp = 0;
-    rocprofiler_agent_id_t   agent_id  = {};
+    size_t* dimension_pos = 0;
+
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
@@ -127,7 +128,7 @@ struct tool_spm_counter_value_t
         ar(cereal::make_nvp("counter_id", id));
         ar(cereal::make_nvp("value", value));
         ar(cereal::make_nvp("timestamp", timestamp));
-        ar(cereal::make_nvp("agent_id", agent_id));
+        ar(cereal::make_nvp("dimension", dimension_pos));
     }
 };
 
@@ -135,16 +136,17 @@ struct tool_spm_counter_record_t
 {
     using container_type = std::vector<tool_spm_counter_value_t>;
 
-    rocprofiler_dispatch_id_t   dispatch_id = {};
+    uint64_t                                     thread_id     = 0;
     serialized_counter_record_t record      = {};
+    rocprofiler_spm_dispatch_counting_service_data_t dispatch_data = {};
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
     {
         // should be removed when moving to buffered tracing
         auto tmp = read();
-
-        ar(cereal::make_nvp("dispatch_id", dispatch_id));
+        ar(cereal::make_nvp("thread_id", thread_id));
+        ar(cereal::make_nvp("dispatch_data", dispatch_data));
         ar(cereal::make_nvp("records", tmp));
     }
 

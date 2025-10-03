@@ -51,6 +51,7 @@ namespace rocprofiler
 {
 namespace SPM
 {
+
 void
 decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine, void* userdata)
 {
@@ -72,13 +73,13 @@ decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine,
 }
 
 void
-aql_data_callback(size_t /**/, void* data, size_t data_size, int flags, void* userdata)
+aql_data_callback(size_t /* len*/, void* data, size_t data_size, int flags, void* userdata)
 {
     SPM::counter_vec counters{};
     auto             spm_packet = static_cast<hsa::SPMPacket*>(userdata);
     if(data_size == 0)
     {
-        spm_packet->decode_data_fn(nullptr, 0, flags, spm_packet->user_data);
+        //spm_packet->record_cb(nullptr, 0, flags, spm_packet->user_data);
         return;
     }
     auto& desc_v0 = *static_cast<rocprofiler::SPM::spm_desc_v0_t*>(spm_packet->spm_desc.data);
@@ -154,10 +155,13 @@ aql_data_callback(size_t /**/, void* data, size_t data_size, int flags, void* us
             }
         }
     }
-    spm_packet->decode_data_fn(records.data(),
+  
+    spm_packet->record_cb(spm_packet->dispatch_data,
+                           records.data(),
                                records.size(),
                                1 << ROCPROFILER_SPM_RECORD_FLAG_DATA | flags,
-                               spm_packet->user_data);
+                               static_cast<rocprofiler_user_data_t*>(spm_packet->user_data),
+                               spm_packet->record_callback_args);
 }
 }  // namespace SPM
 }  // namespace rocprofiler

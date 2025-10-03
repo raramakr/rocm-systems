@@ -25,11 +25,12 @@
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/hsa/internalqueue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 
-#include <rocprofiler-sdk/experimental/spm/capture.h>
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/intercept_table.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
@@ -52,152 +53,111 @@ namespace hsa
 {
 class AQLPacket;
 };
-
 namespace SPM
 {
-struct spm_parameter_pack
+
+struct spm_counter_config
 {
-    uint64_t sample_freq = DEFAULT_SAMPLE_FREQUENCY;
-    uint64_t buffer_size = DEFAULT_BUFFER_SIZE;
-    uint64_t timeout     = DEFAULT_TIMEOUT_MS;
-
-    std::vector<rocprofiler::counters::Metric> metrics{};
-
-    rocprofiler_spm_data_callback_t data_fn{};
-    rocprofiler_user_data_t         user_data{};
-
-    rocprofiler_spm_dispatch_callback_t dispatch_fn{};
-    void*                               config_userdata{nullptr};
-
+    const rocprofiler_agent_t*    agent = nullptr;
+    std::vector<counters::Metric> metrics{};
+    
     static constexpr size_t DEFAULT_SAMPLE_FREQUENCY = 640000;     // 640 KHz
     static constexpr size_t DEFAULT_BUFFER_SIZE      = 0x3000000;  // 48 MB
     static constexpr size_t DEFAULT_TIMEOUT_MS       = 50;         // 100ms
-
+    uint64_t sample_freq = DEFAULT_SAMPLE_FREQUENCY;
+    uint64_t buffer_size = DEFAULT_BUFFER_SIZE;
+    uint64_t timeout     = DEFAULT_TIMEOUT_MS;
+    
+    rocprofiler_spm_counter_config_id_t    id{.handle = 0};
+    // Packet generator to create AQL packets for insertion
+    std::unique_ptr<rocprofiler::aql::SPMPacketConstruct> pkt_generator{nullptr};
+    // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
+    // allocation of new packets/destruction).
+    common::Synchronized<std::vector<std::unique_ptr<rocprofiler::hsa::AQLPacket>>> packets{};
+    
     bool valid() const
     {
         return sample_freq != 0 && buffer_size != 0 && timeout != 0 && !metrics.empty();
     }
 };
 
-class SPMQueue : public hsa::internal_queue::Queue
-{
-public:
-    using Signal = hsa::internal_queue::Signal;
-    class StopSignal
-    {
-    public:
-        StopSignal(hsa::SPMPacket* pkt, std::unique_ptr<Signal>&& _signal)
-        : packet(pkt)
-        , signal(std::move(_signal)){};
-        ~StopSignal();
-
-        hsa::SPMPacket* const   packet;
-        std::unique_ptr<Signal> signal{};
-    };
-
-    SPMQueue(spm_parameter_pack, const hsa::AgentCache&);
-    ~SPMQueue() override;
-
-    std::unique_ptr<Signal>     start();
-    std::unique_ptr<StopSignal> stop();
-
-    const spm_parameter_pack params;
-    std::mutex               mut{};
-
-    std::unique_ptr<hsa::SPMPacket> packet{nullptr};
+struct spm_counter_callback_info
+{   
+    rocprofiler_spm_dispatch_counting_service_cb_t user_cb{nullptr}; 
+    void* callback_args{nullptr};
+    // Link to the context this is associated with
+    rocprofiler_context_id_t context{.handle = 0};
+      // HSA Queue ClientID. This is an ID we get when we insert a callback into the
+    // HSA queue interceptor. This ID can be used to disable the callback.
+    rocprofiler::hsa::ClientID queue_id{-1};
+     // Link to the internal context this is associated with
+    const context::context* internal_context;
+    rocprofiler_spm_dispatch_counting_record_cb_t record_callback;
+    void* record_callback_args;
+    common::Synchronized<
+        std::unordered_map<rocprofiler::hsa::AQLPacket*, std::shared_ptr<spm_counter_config>>>
+        packet_return_map{};
+    static rocprofiler_status_t setup_spm_counter_config(std::shared_ptr<spm_counter_config>&);
+    rocprofiler_status_t get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>&,
+                                    std::shared_ptr<spm_counter_config>&,
+                                    rocprofiler_spm_dispatch_counting_service_data_t,
+                                    rocprofiler_user_data_t*);
 };
 
-class SPMAgentManager
+class SpmCounterController
 {
-public:
-    SPMAgentManager()  = default;
-    ~SPMAgentManager() = default;
-
-    rocprofiler_status_t start_context();
-    void                 stop_context();
-
-    void resource_init();
-    void resource_deinit();
-
-    bool add_agent(rocprofiler_agent_id_t id, spm_parameter_pack _params)
-    {
-        if(has_agent(id)) return false;
-        std::unique_lock<std::mutex> lk(agent_mut);
-        params[id] = std::move(_params);
-        return true;
-    }
-
-    bool has_agent(rocprofiler_agent_id_t id)
-    {
-        std::unique_lock<std::mutex> lk(agent_mut);
-        return params.find(id) != params.end();
-    }
-
-    std::map<rocprofiler_agent_id_t, std::unique_ptr<SPMQueue>> queues{};
-    std::map<rocprofiler_agent_id_t, spm_parameter_pack>        params{};
-
-    std::mutex agent_mut;
-};
-
-class SPMDispatchFactory
-{
-public:
-    SPMDispatchFactory(spm_parameter_pack _params, const hsa::AgentCache&);
-    ~SPMDispatchFactory();
-
-    const spm_parameter_pack params;
-    std::mutex               mut{};
-    std::condition_variable  cv{};
-
-    std::unique_ptr<hsa::SPMPacket> packet{nullptr};
-};
-
-class SPMDispatchManager
-{
-    using AQLPacketPtr = std::unique_ptr<hsa::AQLPacket>;
-    using inst_pkt_t   = common::container::small_vector<std::pair<AQLPacketPtr, int64_t>, 4>;
 
 public:
-    SPMDispatchManager()  = default;
-    ~SPMDispatchManager() = default;
+    SpmCounterController() {};
+    // Adds a counter collection profile to our global cache.
+    // Note: these profiles can be used across multiple contexts
+    //       and are independent of the context.
+    uint64_t spm_add_profile(std::shared_ptr<spm_counter_config>&& config);
 
-    void start_context();
-    void stop_context();
+    void spm_destroy_profile(uint64_t id);
+    // Setup the counter collection service. counter_callback_info is created here
+    // to contain the counters that need to be collected (specified in profile_id) and
+    // the AQL packet generator for injecting packets. Note: the service is created
+    // in the stop state.
+    static rocprofiler_status_t configure_dispatch(
+        rocprofiler_context_id_t                   context_id,
+        rocprofiler_spm_dispatch_counting_service_cb_t callback,
+        void*                                      callback_args,
+        rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
+        void*                                      record_callback_args);
+    std::shared_ptr<spm_counter_config> get_profile_cfg(rocprofiler_spm_counter_config_id_t id);
 
-    void resource_init();
-    void resource_deinit();
-
-    bool add_agent(rocprofiler_agent_id_t id, spm_parameter_pack _params)
-    {
-        if(has_agent(id)) return false;
-        auto lk    = std::unique_lock{agent_mut};
-        params[id] = std::move(_params);
-        return true;
-    }
-
-    bool has_agent(rocprofiler_agent_id_t id)
-    {
-        auto lk = std::unique_lock{agent_mut};
-        return params.find(id) != params.end();
-    }
-
-    std::vector<std::pair<rocprofiler_agent_id_t, std::unique_ptr<hsa::SPMPacket>>> packets{};
-    std::map<rocprofiler_agent_id_t, spm_parameter_pack>                            params{};
-
-    hsa::Queue::pkt_and_serialize_t pre_kernel_call(const hsa::Queue&              queue,
-                                                    uint64_t                       kernel_id,
-                                                    rocprofiler_dispatch_id_t      dispatch_id,
-                                                    rocprofiler_user_data_t*       user_data,
-                                                    const context::correlation_id* corr_id);
-
-    void post_kernel_call(inst_pkt_t& aql, const hsa::queue_info_session& session);
-
-    std::shared_mutex agent_mut{};
-    std::atomic<bool> bActiveCtx{false};
+private:
+    common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<spm_counter_config>>> _configs;
 };
+
+SpmCounterController&
+spm_get_controller();
+
+rocprofiler_status_t
+create_spm_counter_profile(std::shared_ptr<spm_counter_config> config);
+
+void
+destroy_spm_counter_profile(uint64_t id);
+
+std::shared_ptr<spm_counter_config>
+get_spm_counter_config(rocprofiler_spm_counter_config_id_t id);
+
+rocprofiler_status_t
+configure_spm_dispatch(rocprofiler_context_id_t                   context_id,
+                            rocprofiler_spm_dispatch_counting_service_cb_t callback,
+                            void*                                          callback_data_args,
+                            rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
+                            void*                                          record_callback_args);
 
 void
 initialize(HsaApiTable* table);
+
+CoreApiTable&
+get_core();
+
+AmdExtTable&
+get_ext();
 
 void
 finalize();

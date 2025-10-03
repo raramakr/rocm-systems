@@ -30,8 +30,6 @@
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
 #include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/device_counting_service.h>
-#include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 
 namespace rocprofiler

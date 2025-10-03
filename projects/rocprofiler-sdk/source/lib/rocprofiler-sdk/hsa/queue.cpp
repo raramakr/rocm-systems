@@ -553,7 +553,7 @@ Queue::Queue(const AgentCache&  agent,
         << "Could not setup intercept profiler";
 
     if(!context::get_registered_contexts([](const context::context* ctx) {
-            return (ctx->counter_collection || ctx->device_counter_collection || ctx->agent_spm ||
+            return (ctx->counter_collection || ctx->device_counter_collection ||
                     ctx->dispatch_spm || ctx->dispatch_thread_trace || ctx->device_thread_trace);
         }).empty())
     {

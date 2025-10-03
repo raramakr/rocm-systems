@@ -44,7 +44,6 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
-#include <rocprofiler-sdk/experimental/spm/capture.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
@@ -574,7 +573,7 @@ struct profile_counting_record
 
     bool operator!=(rocprofiler_record_counter_t rhs) const { return !(*this == rhs); }
 };
-
+#if 0 
 struct spm_counting_record_t
 {
     rocprofiler_counter_id_t counter_id = {};
@@ -595,7 +594,7 @@ struct spm_counting_record_t
         ar(cereal::make_nvp("value", value));
     }
 };
-
+#endif
 auto counter_info                  = std::deque<rocprofiler_counter_info_v0_t>{};
 auto runtime_init_cb_records       = std::deque<runtime_init_callback_record_t>{};
 auto code_object_records           = std::deque<code_object_callback_record_t>{};
@@ -613,7 +612,7 @@ auto rccl_api_cb_records           = std::deque<rccl_api_callback_record_t>{};
 auto rocdecode_api_cb_records      = std::deque<rocdecode_api_callback_record_t>{};
 auto rocjpeg_api_cb_records        = std::deque<rocjpeg_api_callback_record_t>{};
 auto ompt_cb_records               = std::deque<ompt_callback_record_t>{};
-auto spm_cb_records                = std::deque<spm_counting_record_t>{};
+//auto spm_cb_records                = std::deque<spm_counting_record_t>{};
 
 int
 set_external_correlation_id(rocprofiler_thread_id_t                            thr_id,
@@ -630,6 +629,7 @@ set_external_correlation_id(rocprofiler_thread_id_t                            t
     return 0;
 }
 
+#if 0 
 int
 spm_dispatch_callback(rocprofiler_agent_id_t agent_id,
                       rocprofiler_queue_id_t /* queue_id */,
@@ -695,7 +695,7 @@ spm_data_callback(rocprofiler_spm_counter_record_t* records,
         }
     }
 }
-
+#endif
 void
 dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                   rocprofiler_counter_config_id_t*             config,
@@ -1305,7 +1305,7 @@ rocprofiler_context_id_t memory_allocation_buffered_ctx = {0};
 rocprofiler_context_id_t rccl_api_buffered_ctx          = {0};
 rocprofiler_context_id_t ompt_buffered_ctx              = {0};
 rocprofiler_context_id_t counter_collection_ctx         = {0};
-rocprofiler_context_id_t spm_dispatch_collection_ctx    = {0};
+//rocprofiler_context_id_t spm_dispatch_collection_ctx    = {0};
 rocprofiler_context_id_t scratch_memory_ctx             = {0};
 rocprofiler_context_id_t corr_id_retire_ctx             = {0};
 rocprofiler_context_id_t kernel_dispatch_callback_ctx   = {0};
@@ -1386,8 +1386,8 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"KFD_DROPPED_EVENTS", &kfd_droped_events_event_ctx},
     {"KFD_PAGE_MIGRATE", &kfd_page_migrate_records_ctx},
     {"KFD_PAGE_FAULT", &kfd_page_fault_records_ctx},
-    {"KFD_QUEUE", &kfd_queue_records_ctx},
-    {"SPM_DISPATCH_COLLECTION", &spm_dispatch_collection_ctx}};
+    {"KFD_QUEUE", &kfd_queue_records_ctx}};
+   // {"SPM_DISPATCH_COLLECTION", &spm_dispatch_collection_ctx}};
 
 auto buffers = std::array<rocprofiler_buffer_id_t*, 22>{&runtime_init_buffered_buffer,
                                                         &hsa_api_buffered_buffer,
@@ -2112,7 +2112,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_dispatch_counting_service(
             counter_collection_ctx, counter_collection_buffer, dispatch_callback, nullptr),
-        "setup buffered service");
+    
+            "setup buffered service");
+    #if 0 
     for(auto agent : agents)
     {
         if(agent.logical_node_type_id == 0 and agent.type == ROCPROFILER_AGENT_TYPE_GPU)
@@ -2184,6 +2186,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             }
         }
     }
+    #endif
     for(auto* itr : buffers)
     {
         if(itr->handle == 0) continue;
@@ -2355,7 +2358,7 @@ tool_fini(void* tool_data)
               << ", rocdecode_api_ext_bf_records=" << rocdecode_api_ext_bf_records.size()
               << ", rocjpeg_api_callback_records=" << rocjpeg_api_cb_records.size()
               << ", rocjpeg_api_bf_records=" << rocjpeg_api_bf_records.size()
-              << ", spm_cb_records=" << spm_cb_records.size() << "...\n"
+           //   << ", spm_cb_records=" << spm_cb_records.size() << "...\n"
               << std::flush;
 
     auto* _call_stack = static_cast<call_stack_t*>(tool_data);
@@ -2453,7 +2456,7 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("memory_allocations", memory_allocation_cb_records));
             json_ar(cereal::make_nvp("rocdecode_api_traces", rocdecode_api_cb_records));
             json_ar(cereal::make_nvp("rocjpeg_api_traces", rocjpeg_api_cb_records));
-            json_ar(cereal::make_nvp("spm_records", spm_cb_records));
+          //  json_ar(cereal::make_nvp("spm_records", spm_cb_records));
         } catch(std::exception& e)
         {
             std::cerr << "[" << getpid() << "][" << __FUNCTION__

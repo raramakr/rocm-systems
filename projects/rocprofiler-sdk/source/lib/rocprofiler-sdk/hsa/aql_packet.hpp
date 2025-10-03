@@ -28,7 +28,7 @@
 #include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
 #include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
 
-#include <rocprofiler-sdk/experimental/spm/core.h>
+#include <rocprofiler-sdk/experimental/spm.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -43,6 +43,7 @@ namespace aql
 {
 class CounterPacketConstruct;
 class ThreadTraceAQLPacketFactory;
+class SPMPacketConstruct;
 }  // namespace aql
 
 namespace hsa
@@ -251,6 +252,7 @@ struct SPMMemoryPool : public AQLMemoryPool
 
 class SPMPacket : public AQLPacket
 {
+    friend class rocprofiler::aql::SPMPacketConstruct;
 public:
     SPMPacket(const aqlprofile_spm_profile_t& profile, rocprofiler_agent_id_t agent_id);
     ~SPMPacket() override;
@@ -274,11 +276,12 @@ public:
     bool Valid() const { return is_valid; }
 
     const rocprofiler_agent_id_t       agent_id;
-    rocprofiler_spm_data_callback_t    decode_data_fn{};
-    rocprofiler_user_data_t            user_data{};
+    rocprofiler_user_data_t*           user_data;
+    void*                              record_callback_args{};
     aqlprofile_spm_buffer_desc_t       aql_desc{};
     rocprofiler::SPM::spm_descriptor_t spm_desc{};
-
+    rocprofiler_spm_dispatch_counting_record_cb_t record_cb{};
+    rocprofiler_spm_dispatch_counting_service_data_t dispatch_data{};
     std::shared_ptr<std::vector<char>> container_desc_data{};
 
     void populate_before() override;
