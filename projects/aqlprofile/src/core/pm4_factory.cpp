@@ -27,6 +27,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <stdexcept>
+#include <string_view>
 
 namespace aql_profile {
 namespace {
@@ -76,6 +77,13 @@ aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_
   }
 
   static_assert(sizeof(int_agent_info.name) == 64);
+
+  if (agent_info->agent_gfxip == nullptr) {
+    constexpr auto name_null =
+        std::string_view{"Agent name 'agent_info.agent_gfxip' cannot be null"};
+    ERR_LOGGING << name_null;
+    throw std::runtime_error(name_null.data());
+  }
 
   auto len = strlen(agent_info->agent_gfxip);
   memset(int_agent_info.name, 0, sizeof(int_agent_info.name));
