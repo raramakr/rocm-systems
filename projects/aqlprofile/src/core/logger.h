@@ -40,9 +40,11 @@
 #include <sstream>
 #include <string>
 
+#define DEFAULT_VISIBILITY __attribute__((visibility("default")))
+
 namespace aql_profile {
 
-class Logger {
+class DEFAULT_VISIBILITY Logger {
  public:
   typedef std::recursive_mutex mutex_t;
 
