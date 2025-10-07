@@ -65,7 +65,10 @@ When encountering Python interpreter version conflicts, specify the appropriate 
 
    python3.10 $(which rocpd) convert -f csv -i <input-file>.db
 
-The CSV conversion process generates output files in the ``rocpd-output-data/out_hip_api_trace.csv`` path relative to the current working directory.
+The CSV conversion process generates a consolidated trace output file ``rocpd-output-data/out_regions_trace.csv`` path relative to the current working directory.
+
+This consolidated approach replaces the previous API-specific CSV files (``out_hip_api_trace.csv``, ``out_hsa_api_trace.csv``, ``out_marker_api_trace.csv``, etc.) to provide comprehensive coverage of all traced regions, including MPI functions, pthread functions, and other regions captured by rocprofiler-systems beyond the core ROCm APIs.
+
 
 **OTF2 Format Conversion:**
 
