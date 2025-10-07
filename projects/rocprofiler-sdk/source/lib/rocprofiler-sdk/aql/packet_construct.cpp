@@ -188,10 +188,8 @@ SPMPacketConstruct::SPMPacketConstruct(const rocprofiler_agent_id_t agent_id,
                       const std::vector<counters::Metric>& metrics,
                       uint64_t sample_freq,
                       uint64_t buffer_size,
-                      uint64_t timeout,
-                      const hsa::SPMMemoryPool&  pool)
+                      uint64_t timeout)
 : _agent_id(agent_id)
-, _pool(pool)
 {
     auto * agent = CHECK_NOTNULL(rocprofiler::agent::get_agent(_agent_id));
     const double sclk_freq   = agent->max_engine_clk_fcompute * 1E6;  // MHz
@@ -235,38 +233,18 @@ SPMPacketConstruct::SPMPacketConstruct(const rocprofiler_agent_id_t agent_id,
 }
 
 std::unique_ptr<hsa::SPMPacket>
-SPMPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTable& ext, 
-    rocprofiler_spm_dispatch_counting_service_data_t dispatch_data,
-    rocprofiler_spm_dispatch_counting_record_cb_t record_callback,
-    rocprofiler_user_data_t* user_data,
-    void*  record_callback_args)
+SPMPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTable& ext)
 {
-    const auto* agent_cache =
+    const auto* agent =
         rocprofiler::agent::get_agent_cache(CHECK_NOTNULL(rocprofiler::agent::get_agent(_agent_id)));
     auto pool =
-        std::make_shared<hsa::SPMMemoryPool>(*(CHECK_NOTNULL(agent_cache)),
+        std::make_shared<hsa::SPMMemoryPool>(*agent,
                                ext,
                                coreapi.hsa_memory_copy_fn);
-    aqlprofile_spm_profile_t profile{};
-    profile.events          = events.data();
-    profile.event_count     = events.size();
-    profile.parameter_count = params.size();
-    profile.parameters      = params.data();
-
-    profile.aql_agent  = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(_agent_id));
-    profile.hsa_agent  = pool->gpu_agent;
-    profile.alloc_cb   = &hsa::AQLMemoryPool::Alloc;
-    profile.dealloc_cb = &hsa::AQLMemoryPool::Free;
-    profile.memcpy_cb  = &hsa::AQLMemoryPool::Copy;
-    profile.userdata   = pool.get();
-
-    auto pkt = std::make_unique<hsa::SPMPacket>(profile, _agent_id);
+    const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent->get_rocp_agent()->id);
+    auto pkt = std::make_unique<hsa::SPMPacket>(*aql_agent, events, params, *pool);
     if(!pkt->Valid()) return nullptr;
-
-    pool->handle            = pkt->handle;
-    pool->delete_packets_fn = pkt->sym.delete_packets_fn;
-    pkt->pool               = std::move(pool);
-
+    
     pkt->spm_desc.size =
         sizeof(SPM::spm_desc_v0_t) + id_map.size() * sizeof(id_map[0]) + pkt->aql_desc.size;
 
@@ -282,8 +260,7 @@ SPMPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTa
     std::memcpy(desc->aqlprofile_desc(), pkt->aql_desc.data, pkt->aql_desc.size);
     std::memcpy(desc->events(), id_map.data(), id_map.size() * sizeof(id_map[0]));
 
-    pkt->record_cb = record_callback;
-    pkt->record_callback_args = record_callback_args;
+
     pkt->clear();
     return pkt;
 }

@@ -135,15 +135,10 @@ public:
                       const std::vector<counters::Metric>& metrics,
                       uint64_t sample_freq,
                       uint64_t buffer_size,
-                      uint64_t timeout,
-                      const hsa::SPMMemoryPool&  pool);
+                      uint64_t timeout);
 
     std::unique_ptr<hsa::SPMPacket> construct_packet(const CoreApiTable&,
-                                                            const AmdExtTable&, 
-    rocprofiler_spm_dispatch_counting_service_data_t dispatch_data,
-    rocprofiler_spm_dispatch_counting_record_cb_t record_callback,
-    rocprofiler_user_data_t* user_data,
-    void* record_callback_args);
+                                                            const AmdExtTable&);
     rocprofiler_status_t can_collect();
 
 protected:
@@ -160,8 +155,6 @@ private:
     std::vector<AQLProfileMetric>           _metrics;
     std::vector<aqlprofile_pmc_event_t>     events{};
     std::vector<aqlprofile_spm_parameter_t> params{};
-    hsa::SPMMemoryPool                      _pool{};
-   
 };
 
 }  // namespace aql

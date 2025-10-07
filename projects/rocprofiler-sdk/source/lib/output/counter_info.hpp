@@ -119,7 +119,7 @@ struct tool_spm_counter_value_t
     rocprofiler_counter_id_t id        = {};
     uint64_t                 value     = 0;
     rocprofiler_timestamp_t  timestamp = 0;
-    size_t* dimension_pos = 0;
+    size_t dimension_pos = 0;
 
 
     template <typename ArchiveT>

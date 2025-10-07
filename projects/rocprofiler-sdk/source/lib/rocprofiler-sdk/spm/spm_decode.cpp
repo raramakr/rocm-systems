@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/static_object.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
@@ -125,7 +126,8 @@ aql_data_callback(size_t /* len*/, void* data, size_t data_size, int flags, void
                 {
                     records.emplace_back(rocprofiler_spm_counter_record_t{
                         .size      = sizeof(rocprofiler_spm_counter_record_t),
-                        .agent_id  = spm_packet->agent_id,
+                        .agent_id =
+                            (rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))->id,
                         .id        = instance_id,
                         .timestamp = times[it],
                         .value     = values[it]});
@@ -147,7 +149,8 @@ aql_data_callback(size_t /* len*/, void* data, size_t data_size, int flags, void
                 {
                     records.emplace_back(rocprofiler_spm_counter_record_t{
                         .size      = sizeof(rocprofiler_spm_counter_record_t),
-                        .agent_id  = spm_packet->agent_id,
+                        .agent_id =
+                            (rocprofiler::agent::get_rocprofiler_agent(spm_packet->GetAgent()))->id,
                         .id        = instance_id,
                         .timestamp = times[it],
                         .value     = values[it]});

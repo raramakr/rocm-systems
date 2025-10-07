@@ -126,37 +126,15 @@ spm_counter_callback_info::setup_spm_counter_config(std::shared_ptr<spm_counter_
     // This call needs to be thread protected in that only one thread must be setting up profile at
     // the same time.
 
-    auto& config     = *profile;
-    auto  agent_name = std::string(config.agent->name);
-    auto pool        = hsa::SPMMemoryPool{};
-    pool.allocate_fn = [](hsa_amd_memory_pool_t, size_t size, uint32_t, void** ptr) {
-        *ptr = malloc(size);
-        return HSA_STATUS_SUCCESS;
-    };
-    pool.allow_access_fn = [](uint32_t, const hsa_agent_t*, const uint32_t*, const void*) {
-        return HSA_STATUS_SUCCESS;
-    };
-    pool.free_fn = [](void* ptr) {
-        free(ptr);
-        return HSA_STATUS_SUCCESS;
-    };
-    pool.fill_fn = [](void* ptr, uint32_t value, size_t size) {
-        memset(ptr, value, size * sizeof(uint32_t));
-        return HSA_STATUS_SUCCESS;
-    };
-    pool.api_copy_fn = [](void* dst, const void* src, size_t size) {
-        memcpy(dst, src, size);
-        return HSA_STATUS_SUCCESS;
-    };
-
+    auto& config           = *profile;
+    auto  agent_name       = std::string(config.agent->name);
     profile->pkt_generator = std::make_unique<rocprofiler::aql::SPMPacketConstruct>(
         config.agent->id,
         std::vector<counters::Metric>{config.metrics.begin(),
                                       config.metrics.end()},
         config.sample_freq,
         config.buffer_size,
-        config.timeout,
-        pool);
+        config.timeout);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -181,8 +159,7 @@ spm_counter_callback_info::get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLP
         // If we do not have a packet in the cache, create one.
         ret_pkt = profile->pkt_generator->construct_packet(
             get_core(),
-            get_ext(),
-            dispatch_data, record_callback, user_data, record_callback_args);
+            get_ext());
     }
     
     auto* pkt = dynamic_cast<hsa::SPMPacket*>(ret_pkt.get());
@@ -190,7 +167,9 @@ spm_counter_callback_info::get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLP
    
     pkt->dispatch_data = dispatch_data; 
     pkt->user_data = user_data;
-    
+    pkt->record_cb            = record_callback;
+    pkt->record_callback_args = record_callback_args;
+
     ret_pkt->clear();
     
     packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), profile); });

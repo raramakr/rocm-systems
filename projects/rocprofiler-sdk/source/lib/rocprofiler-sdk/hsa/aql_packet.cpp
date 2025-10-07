@@ -246,11 +246,33 @@ SPMMemoryPool::Alloc(void** ptr, size_t size, desc_t flags)
     return status;
 }
 
-SPMPacket::SPMPacket(const aqlprofile_spm_profile_t& profile, rocprofiler_agent_id_t _agent_id)
-: agent_id(_agent_id)
+SPMPacket::SPMPacket(aqlprofile_agent_handle_t               aql_agent,
+                     std::vector<aqlprofile_pmc_event_t>     events,
+                     std::vector<aqlprofile_spm_parameter_t> params,
+                     hsa::SPMMemoryPool                      _pool)
+: agent(aql_agent)
 , sym()
 {
     ROCP_FATAL_IF(!sym.valid()) << "Failed to load aqlprofile SPM library";
+    
+    if(events.empty() || params.empty()) return;
+
+    _pool.handle            = handle;
+    _pool.delete_packets_fn = sym.delete_packets_fn;
+    this->pool              = std::make_shared<hsa::SPMMemoryPool>(_pool);
+
+    aqlprofile_spm_profile_t profile{};
+    profile.events          = events.data();
+    profile.event_count     = events.size();
+    profile.parameter_count = params.size();
+    profile.parameters      = params.data();
+
+    profile.aql_agent  = aql_agent;
+    profile.hsa_agent  = pool->gpu_agent;
+    profile.alloc_cb   = &hsa::AQLMemoryPool::Alloc;
+    profile.dealloc_cb = &hsa::AQLMemoryPool::Free;
+    profile.memcpy_cb  = &hsa::AQLMemoryPool::Copy;
+    profile.userdata   = pool.get();
 
     auto status = sym.create_packets_fn(&handle, &aql_desc, &packets, profile, 0);
     if(status != HSA_STATUS_SUCCESS) return;

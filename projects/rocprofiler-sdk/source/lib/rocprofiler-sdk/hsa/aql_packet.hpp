@@ -254,11 +254,14 @@ class SPMPacket : public AQLPacket
 {
     friend class rocprofiler::aql::SPMPacketConstruct;
 public:
-    SPMPacket(const aqlprofile_spm_profile_t& profile, rocprofiler_agent_id_t agent_id);
+    SPMPacket(aqlprofile_agent_handle_t               aql_agent,
+                     std::vector<aqlprofile_pmc_event_t>     events,
+                     std::vector<aqlprofile_spm_parameter_t> params,
+                     hsa::SPMMemoryPool                      _pool);
     ~SPMPacket() override;
 
     explicit SPMPacket(const SPMPacket& other)
-    : agent_id(other.agent_id)
+    : agent(other.agent)
     , sym(other.sym)
     {
         packets             = other.packets;
@@ -275,7 +278,7 @@ public:
     void kfd_stop();
     bool Valid() const { return is_valid; }
 
-    const rocprofiler_agent_id_t       agent_id;
+    aqlprofile_agent_handle_t                        agent;
     rocprofiler_user_data_t*           user_data;
     void*                              record_callback_args{};
     aqlprofile_spm_buffer_desc_t       aql_desc{};

@@ -1021,11 +1021,7 @@ generate_csv(const output_config&                        cfg,
     if(cfg.stats && stats)
         write_stats(get_stats_output_file(cfg, domain_type::STREAMING_PERFORMANCE_MONITOR),
                     stats.entries);
-                    
-    struct tool_dispatch_data_t{
-       rocprofiler_spm_dispatch_counting_service_data_t data; 
-       uint64_t thread_id; 
-    };
+    
     auto ofs = tool::csv_output_file{cfg,
                                      domain_type::STREAMING_PERFORMANCE_MONITOR,
                                      tool::csv::spm_csv_encoder{},
@@ -1050,22 +1046,15 @@ generate_csv(const output_config&                        cfg,
     auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
     for(const auto& itr : tool_metadata.get_counter_info())
         counter_id_to_name.emplace(itr.id, itr.name);
-
-    auto dispatch_counter =
-        std::unordered_map<rocprofiler_dispatch_id_t,
-                           std::unordered_map<rocprofiler_counter_id_t, uint64_t>>{};
-    auto dispatch_data_map = 
-        std::unordered_map<rocprofiler_dispatch_id_t,  tool_dispatch_data_t>{};
-
+    
     for(auto ditr : data)
     {
         for(auto record : data.get(ditr))
         {
             auto row_ss = std::stringstream{};
-            auto dispatch_id   = record.dispatch_data.dispatch_info.dispatch_id;
             auto record_vector = record.read();
              
-            auto dispatch_data = tool_dispatch_data.data;
+            auto dispatch_data =    record.dispatch_data;
             auto kernel_id        = dispatch_data.dispatch_info.kernel_id;
             const auto& correlation_id = dispatch_data.correlation_id;
             const auto* kernel_info    = tool_metadata.get_kernel_symbol(kernel_id);
@@ -1088,7 +1077,7 @@ generate_csv(const output_config&                        cfg,
                         .as_string(),
                 dispatch_data.dispatch_info.queue_id.handle,
                 tool_metadata.process_id,
-                tool_dispatch_data.thread_id,
+                record.thread_id,
                 magnitude(dispatch_data.dispatch_info.grid_size),
                 dispatch_data.dispatch_info.kernel_id,
                 tool_metadata.get_kernel_name(
