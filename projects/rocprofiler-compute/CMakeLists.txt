@@ -405,18 +405,6 @@ add_test(
 )
 
 # ---------------------------
-# DB Connector tests
-# ---------------------------
-
-add_test(
-    NAME test_db_connector
-    COMMAND
-        ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_db_connector.xml
-        ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_db_connector.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-)
-
-# ---------------------------
 # Utils tests
 # ---------------------------
 
@@ -461,7 +449,6 @@ if(${ENABLE_COVERAGE})
         test_L1_cache_counters
         test_num_xcds_spec_class
         test_num_xcds_cli_output
-        test_db_connector
         test_utils
         test_autogen_config
     )
@@ -549,14 +536,7 @@ install(
     DIRECTORY src/rocprof_compute_tui
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
-    PATTERN "__pycache__" EXCLUDE
-)
-# grafana assets
-install(
-    DIRECTORY grafana
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
-    COMPONENT main
-)
+    PATTERN "__pycache__" EXCLUDE)
 # samples
 install(
     DIRECTORY sample

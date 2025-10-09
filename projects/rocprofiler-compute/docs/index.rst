@@ -23,7 +23,6 @@ ROCm Compute Profiler is open source and hosted at `<https://github.com/ROCm/roc
    .. grid-item-card:: Install
 
       * :doc:`Installation and deployment <install/core-install>`
-      * :doc:`Grafana server for ROCm Compute Profiler <install/grafana-setup>`
 
    .. grid-item::
 
@@ -43,8 +42,6 @@ in practice.
       * :doc:`how-to/analyze/mode`
 
         * :doc:`how-to/analyze/cli`
-
-        * :doc:`how-to/analyze/grafana-gui`
 
         * :doc:`how-to/analyze/standalone-gui`
 
