@@ -102,6 +102,18 @@ set_tests_properties(
 add_test(NAME thread-trace-api-large-buffer-test
          COMMAND $<TARGET_FILE:thread-trace-api-agent-test>)
 
+# Feature introduced in ROCm 7.1, however some pre-release CI builds for 7.1 dont have
+# this feature in aqlprofile. Disable the next tests for ROCm < 7.2.
+set(IS_DISABLED True)
+find_package(hip CONFIG REQUIRED)
+if(hip_FOUND)
+    if(${hip_VERSION_MAJOR} EQUAL 7 AND ${hip_VERSION_MINOR} GREATER 1)
+        set(IS_DISABLED False)
+    elseif(${hip_VERSION_MAJOR} GREATER 7)
+        set(IS_DISABLED False)
+    endif()
+endif()
+
 set_tests_properties(
     thread-trace-api-large-buffer-test
     PROPERTIES TIMEOUT
@@ -109,11 +121,11 @@ set_tests_properties(
                LABELS
                "integration-tests"
                ENVIRONMENT
-               "${PRELOAD_ENV};ATT_BUFFER_SIZE_MB=5120"
+               "${PRELOAD_ENV};ATT_LARGE_BUFFER_TEST=1"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+               ${IS_DISABLED})
 
 # Test occupancy mode
 add_test(NAME thread-trace-api-extra-args
@@ -130,4 +142,4 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+               ${IS_DISABLED})
