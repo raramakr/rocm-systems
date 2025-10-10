@@ -1102,8 +1102,9 @@ typedef hipError_t (*t_hipLibraryLoadFromFile)(hipLibrary_t* library, const char
 typedef hipError_t (*t_hipLibraryUnload)(hipLibrary_t library);
 typedef hipError_t (*t_hipLibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t library,
                                             const char* name);
-typedef hipError_t (*t_hipLibraryGetKernelCount)(unsigned int *count,
-                                                 hipLibrary_t library);
+typedef hipError_t (*t_hipLibraryGetKernelCount)(unsigned int* count, hipLibrary_t library);
+typedef hipError_t (*t_hipMemGetDefaultMemPool)(hipMemPool_t* memPool, hipMemLocation* location,
+                                                hipMemAllocationType type);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1678,6 +1679,7 @@ struct HipDispatchTable {
   t_hipLibraryUnload hipLibraryUnload_fn;
   t_hipLibraryGetKernel hipLibraryGetKernel_fn;
   t_hipLibraryGetKernelCount hipLibraryGetKernelCount_fn;
+  t_hipMemGetDefaultMemPool hipMemGetDefaultMemPool_fn;
 
   // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 15

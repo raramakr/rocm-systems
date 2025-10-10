@@ -6349,6 +6349,16 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
 
 /**
+ * @brief Returns the default memory pool for a given location and allocation type
+ * 
+ * @param [out] memPool
+ * @param [in] location
+ * @param [in] type
+ */
+hipError_t hipMemGetDefaultMemPool(hipMemPool_t* memPool, hipMemLocation* location,
+                                   hipMemAllocationType type);
+
+/**
  * @brief Load hip Library from inmemory object
  *
  * @param [out] library Output Library

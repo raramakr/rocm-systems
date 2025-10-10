@@ -462,7 +462,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipLibraryGetKernel = 442,
   HIP_API_ID_hipLibraryGetKernelCount = 443,
   HIP_API_ID_hipMemGetHandleForAddressRange = 444,
-  HIP_API_ID_LAST = 444,
+  HIP_API_ID_hipMemGetDefaultMemPool = 445
+  HIP_API_ID_LAST = 445,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -931,6 +932,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipUserObjectRelease: return "hipUserObjectRelease";
     case HIP_API_ID_hipUserObjectRetain: return "hipUserObjectRetain";
     case HIP_API_ID_hipWaitExternalSemaphoresAsync: return "hipWaitExternalSemaphoresAsync";
+    case HIP_API_ID_hipMemGetDefaultMemPool: return "HIP_API_ID_hipMemGetDefaultMemPool";
   };
   return "unknown";
 };
@@ -1369,6 +1371,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipUserObjectRelease", name) == 0) return HIP_API_ID_hipUserObjectRelease;
   if (strcmp("hipUserObjectRetain", name) == 0) return HIP_API_ID_hipUserObjectRetain;
   if (strcmp("hipWaitExternalSemaphoresAsync", name) == 0) return HIP_API_ID_hipWaitExternalSemaphoresAsync;
+  if (strcmp("HIP_API_ID_hipMemGetDefaultMemPool", name) == 0) return HIP_API_ID_hipMemGetDefaultMemPool;
   return HIP_API_ID_NONE;
 }
 
@@ -4003,6 +4006,13 @@ typedef struct hip_api_data_s {
       unsigned int numExtSems;
       hipStream_t stream;
     } hipWaitExternalSemaphoresAsync;
+    struct {
+      hipMemPool_t* memPool;
+      hipMemPool_t memPool__val;
+      hipMemLocation* location;
+      hipMemLocation location__val;
+      hipMemAllocationType type;
+    } hipMemGetDefaultMemPool;
   } args;
   uint64_t *phase_data;
 } hip_api_data_t;
@@ -6652,6 +6662,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipWaitExternalSemaphoresAsync.numExtSems = (unsigned int)numExtSems; \
   cb_data.args.hipWaitExternalSemaphoresAsync.stream = (hipStream_t)stream; \
 };
+// hipMemGetDefaultMemPool[('hipMemPool_t*', 'memPool'), ('hipMemLocation*', 'location'), ('hipMemAllocationType', 'type')]
+#define INIT_hipMemGetDefaultMemPool_CB_ARGS_DATA(cb_data) {
+  cb_data.args.hipMemGetDefaultMemPool.memPool = (hipMemPool_t*)memPool; \
+  cb_data.args.hipMemGetDefaultMemPool.location = (hipMemLocation*)location; \
+  cb_data.args.hipMemGetDefaultMemPool.type = (hipMemAllocationType)type; \
+};
 #define INIT_CB_ARGS_DATA(cb_id, cb_data) INIT_##cb_id##_CB_ARGS_DATA(cb_data)
 
 // Macros for non-public API primitives
@@ -8421,6 +8437,11 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipWaitExternalSemaphoresAsync:
       if (data->args.hipWaitExternalSemaphoresAsync.extSemArray) data->args.hipWaitExternalSemaphoresAsync.extSemArray__val = *(data->args.hipWaitExternalSemaphoresAsync.extSemArray);
       if (data->args.hipWaitExternalSemaphoresAsync.paramsArray) data->args.hipWaitExternalSemaphoresAsync.paramsArray__val = *(data->args.hipWaitExternalSemaphoresAsync.paramsArray);
+      break;
+// hipMemGetDefaultMemPool[('hipMemPool_t*', 'memPool'), ('hipMemLocation*', 'location'), ('hipMemAllocationType', 'type')]
+    case HIP_API_ID_hipMemGetDefaultMemPool:
+      if (data->args.hipMemGetDefaultMemPool.memPool) data->args.hipMemGetDefaultMemPool.memPool__val = *(data->args.hipMemGetDefaultMemPool.memPool);
+      if (data->args.hipMemGetDefaultMemPool.location) data->args.hipMemGetDefaultMemPool.location__val = *(data->args.hipMemGetDefaultMemPool.location);
       break;
     default: break;
   };
@@ -11936,6 +11957,15 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", stream="; roctracer::hip_support::detail::operator<<(oss, data->args.hipWaitExternalSemaphoresAsync.stream);
       oss << ")";
     break;
+    case HIP_API_ID_hipMemGetDefaultMemPool:
+      oss << "hipMemGetDefaultMemPool(";
+      if (data->args.hipMemGetDefaultMemPool.memPool == NULL) oss << "memPool=NULL";
+      else { oss << "memPool="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetDefaultMemPool.memPool__val); }
+      if (data->args.hipMemGetDefaultMemPool.location == NULL) oss << ", location=NULL";
+      else { oss << ", location="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetDefaultMemPool.location__val); }
+      oss << ", type="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMemGetDefaultMemPool.type);
+      oss << ")";
+      break;
     default: oss << "unknown";
   };
   return strdup(oss.str().c_str());
