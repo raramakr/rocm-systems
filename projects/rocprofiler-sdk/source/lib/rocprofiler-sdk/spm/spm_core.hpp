@@ -73,7 +73,7 @@ struct spm_counter_config
     std::unique_ptr<rocprofiler::aql::SPMPacketConstruct> pkt_generator{nullptr};
     // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
     // allocation of new packets/destruction).
-    common::Synchronized<std::vector<std::unique_ptr<rocprofiler::hsa::AQLPacket>>> packets{};
+    std::unique_ptr<rocprofiler::hsa::SPMPacket> packet;
     
     bool valid() const
     {
@@ -98,7 +98,7 @@ struct spm_counter_callback_info
         std::unordered_map<rocprofiler::hsa::AQLPacket*, std::shared_ptr<spm_counter_config>>>
         packet_return_map{};
     static rocprofiler_status_t setup_spm_counter_config(std::shared_ptr<spm_counter_config>&);
-    rocprofiler_status_t get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>&,
+    rocprofiler_status_t get_spm_packet(std::unique_ptr<rocprofiler::hsa::SPMPacket>&,
                                     std::shared_ptr<spm_counter_config>&,
                                     rocprofiler_spm_dispatch_counting_service_data_t,
                                     rocprofiler_user_data_t*);
@@ -129,6 +129,7 @@ public:
 
 private:
     common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<spm_counter_config>>> _configs;
+
 };
 
 SpmCounterController&
@@ -149,18 +150,5 @@ configure_spm_dispatch(rocprofiler_context_id_t                   context_id,
                             void*                                          callback_data_args,
                             rocprofiler_spm_dispatch_counting_record_cb_t  record_callback,
                             void*                                          record_callback_args);
-
-void
-initialize(HsaApiTable* table);
-
-CoreApiTable&
-get_core();
-
-AmdExtTable&
-get_ext();
-
-void
-finalize();
-
 }  // namespace SPM
 }  // namespace rocprofiler

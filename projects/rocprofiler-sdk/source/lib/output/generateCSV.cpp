@@ -1041,7 +1041,8 @@ generate_csv(const output_config&                        cfg,
                                       "Accum_VGPR_Count",
                                       "SGPR_Count",
                                       "Counter_Name", 
-                                      "Counter_Value"}};
+                                      "Counter_Value",
+                                      "Sample_Timestamp"}};
 
     auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
     for(const auto& itr : tool_metadata.get_counter_info())
@@ -1066,7 +1067,21 @@ generate_csv(const output_config&                        cfg,
             for(auto& count : record_vector)
             {
               auto counter_name_dim = std::stringstream{};
-              counter_name_dim << counter_id_to_name.at(count.id) << "[0:" << count.dimension_pos << "]";
+              auto dimensions = tool_metadata.get_counter_dimension_info();
+              counter_name_dim << counter_id_to_name.at(count.id) << "[";
+              size_t dim_count = -1;
+              auto delim = ","; 
+              for(auto dim: dimensions)
+              {
+                size_t pos = 0;
+                dim_count ++; 
+                ROCPROFILER_CHECK(rocprofiler_query_record_dimension_position(count.instance_id, dim.id, &pos)); 
+                counter_name_dim  << std::string(dim.name).erase(0, 10) << ":" << pos;
+                if(dim_count != dimensions.size()-1)
+                  counter_name_dim << delim; 
+              }
+              counter_name_dim << "]"; 
+             
               tool::csv::spm_csv_encoder::write_row(
                 row_ss,   
                 correlation_id.internal,

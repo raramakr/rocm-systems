@@ -243,9 +243,10 @@ struct SPMMemoryPool : public AQLMemoryPool
         if(delete_packets_fn && handle.handle) delete_packets_fn(handle);
     };
 
+
     explicit SPMMemoryPool() = default;
     hsa_status_t Alloc(void** ptr, size_t size, desc_t flags) override;
-
+    
     SPM::Dlsym::DeleteFn* delete_packets_fn{nullptr};
     aqlprofile_handle_t   handle{};
 };
@@ -255,9 +256,7 @@ class SPMPacket : public AQLPacket
     friend class rocprofiler::aql::SPMPacketConstruct;
 public:
     SPMPacket(aqlprofile_agent_handle_t               aql_agent,
-                     std::vector<aqlprofile_pmc_event_t>     events,
-                     std::vector<aqlprofile_spm_parameter_t> params,
-                     hsa::SPMMemoryPool                      _pool);
+              aqlprofile_spm_profile_t profile);
     ~SPMPacket() override;
 
     explicit SPMPacket(const SPMPacket& other)

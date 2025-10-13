@@ -1567,16 +1567,14 @@ spm_data_callback(rocprofiler_spm_dispatch_counting_service_data_t dispatch_data
         for(size_t count = 0; count < record_count; count++)
         {
             auto _counter_id = rocprofiler_counter_id_t{};
-            size_t dim_pos = 0; 
+            
             ROCPROFILER_CALL(rocprofiler_query_record_counter_id(records[count].id, &_counter_id),
                              "query record counter id");
-            ROCPROFILER_CALL(rocprofiler_query_record_dimension_position(records[count].id, 0,
-                                        &dim_pos), "query dimension pos"); 
             serialized_records.emplace_back(
                 tool::tool_spm_counter_value_t{_counter_id,
-                                               dim_pos,
                                                records[count].value,
-                                               records[count].timestamp});
+                                               records[count].timestamp,
+                                               records[count].id});
         }
 
         if(!serialized_records.empty())

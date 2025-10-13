@@ -95,7 +95,7 @@ struct spm_dispatch_counter_collection_service
     // Each instance is assocated with an agent and a counter collection profile.
     // Contains callback information along with other data needed to collect/process
     // counters.
-    std::vector<std::shared_ptr<SPM::spm_counter_callback_info>> callbacks{};
+    std::shared_ptr<SPM::spm_counter_callback_info> callback{};
     // A flag to state wether or not the counter set is currently enabled. This is primarily
     // to protect against multithreaded calls to enable a context (and enabling already enabled
     // counters).

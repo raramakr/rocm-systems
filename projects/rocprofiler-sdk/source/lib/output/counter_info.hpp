@@ -114,21 +114,21 @@ struct tool_counter_record_t
     void           write(const container_type& data);
 };
 
+
 struct tool_spm_counter_value_t
 {
     rocprofiler_counter_id_t id        = {};
     uint64_t                 value     = 0;
     rocprofiler_timestamp_t  timestamp = 0;
-    size_t dimension_pos = 0;
-
-
+    rocprofiler_counter_instance_id_t instance_id = {};
+  
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
     {
         ar(cereal::make_nvp("counter_id", id));
         ar(cereal::make_nvp("value", value));
         ar(cereal::make_nvp("timestamp", timestamp));
-        ar(cereal::make_nvp("dimension", dimension_pos));
+        ar(cereal::make_nvp("instance_id", instance_id));
     }
 };
 
@@ -149,7 +149,7 @@ struct tool_spm_counter_record_t
         ar(cereal::make_nvp("dispatch_data", dispatch_data));
         ar(cereal::make_nvp("records", tmp));
     }
-
+    
     container_type read() const;
     void           write(const container_type& data);
 };

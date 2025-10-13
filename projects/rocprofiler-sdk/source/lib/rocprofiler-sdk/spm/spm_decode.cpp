@@ -74,7 +74,7 @@ decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine,
 }
 
 void
-aql_data_callback(size_t /* len*/, void* data, size_t data_size, int flags, void* userdata)
+aql_data_callback(size_t buffer_id, void* data, size_t data_size, int flags, void* userdata)
 {
     SPM::counter_vec counters{};
     auto             spm_packet = static_cast<hsa::SPMPacket*>(userdata);
@@ -120,7 +120,7 @@ aql_data_callback(size_t /* len*/, void* data, size_t data_size, int flags, void
                 auto instance_id = rocprofiler_counter_instance_id_t{};
                 counters::set_dim_in_rec(instance_id,
                                          rocprofiler::counters::ROCPROFILER_DIMENSION_XCC,
-                                         spm_packet->spm_desc.buffer_num);
+                                         buffer_id);
                 counters::set_counter_in_rec(instance_id, event.id);
                 for(size_t it = 0; it < size; it++)
                 {
@@ -138,7 +138,7 @@ aql_data_callback(size_t /* len*/, void* data, size_t data_size, int flags, void
                 auto instance_id = rocprofiler_counter_instance_id_t{};
                 counters::set_dim_in_rec(instance_id,
                                          rocprofiler::counters::ROCPROFILER_DIMENSION_XCC,
-                                         spm_packet->spm_desc.buffer_num);
+                                         buffer_id);
                 counters::set_dim_in_rec(
                     instance_id, rocprofiler::counters::ROCPROFILER_DIMENSION_SHADER_ENGINE, se);
                 counters::set_dim_in_rec(instance_id,

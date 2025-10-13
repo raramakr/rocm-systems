@@ -56,39 +56,40 @@ start_context(const context::context* ctx)
 
     if(!already_enabled)
     {
-        for(auto& cb : ctx->dispatch_spm->callbacks)
-        {
-            // Insert our callbacks into HSA Interceptor. This
-            // turns on counter instrumentation.
-            if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
-            cb->queue_id = controller->add_callback(
-                std::nullopt,
-                [=](const hsa::Queue&                                               q,
-                    const hsa::rocprofiler_packet&                                  kern_pkt,
-                    rocprofiler_kernel_id_t                                         kernel_id,
-                    rocprofiler_dispatch_id_t                                       dispatch_id,
-                    rocprofiler_user_data_t*                                        user_data,
-                    const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
-                    const context::correlation_id* correlation_id) {
-                    return pre_kernel_call(ctx,
-                                    cb,
-                                    q,
-                                    kern_pkt,
-                                    kernel_id,
-                                    dispatch_id,
-                                    user_data,
-                                    extern_corr_ids,
-                                    correlation_id);
-                },
-                // Completion CB
-                [=](const hsa::Queue& /* q */,
-                    hsa::rocprofiler_packet /* kern_pkt */,
-                    std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
-                    inst_pkt_t&                                        aql,
-                    kernel_dispatch::profiling_time                    dispatch_time) {
-                    post_kernel_call(ctx, cb, session, aql, dispatch_time);
-                });
-        }
+
+        if(ctx->dispatch_spm->callback->queue_id != rocprofiler::hsa::ClientID{-1})
+           return;
+        // Insert our callbacks into HSA Interceptor. This
+        // turns on counter instrumentation.
+        auto& cb = ctx->dispatch_spm->callback;
+        cb->queue_id = controller->add_callback(
+            std::nullopt,
+            [=](const hsa::Queue&                                               q,
+                const hsa::rocprofiler_packet&                                  kern_pkt,
+                rocprofiler_kernel_id_t                                         kernel_id,
+                rocprofiler_dispatch_id_t                                       dispatch_id,
+                rocprofiler_user_data_t*                                        user_data,
+                const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
+                const context::correlation_id* correlation_id) {
+                return pre_kernel_call(ctx,
+                                cb,
+                                q,
+                                kern_pkt,
+                                kernel_id,
+                                dispatch_id,
+                                user_data,
+                                extern_corr_ids,
+                                correlation_id);
+            },
+            // Completion CB
+            [=](const hsa::Queue& /* q */,
+                hsa::rocprofiler_packet /* kern_pkt */,
+                std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
+                inst_pkt_t&                                        aql,
+                kernel_dispatch::profiling_time                    dispatch_time) {
+                post_kernel_call(ctx, cb, session, aql, dispatch_time);
+            });
+        
     }
 }
 
@@ -122,8 +123,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     packet->kfd_start();
 
-    get_core().hsa_signal_destroy_fn(before_krn.at(0).barrier_and.completion_signal);
-    get_core().hsa_signal_store_screlease_fn(before_krn.at(1).barrier_and.dep_signal[0], 0);
+    CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table().hsa_signal_destroy_fn(before_krn.at(0).barrier_and.completion_signal);
+    CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table().hsa_signal_store_screlease_fn(before_krn.at(1).barrier_and.dep_signal[0], 0);
     return false;
 }
 
@@ -193,7 +194,7 @@ pre_kernel_call(const context::context*        ctx,
     auto prof_config = spm_get_controller().get_profile_cfg(req_profile);
     CHECK(prof_config);
     
-    std::unique_ptr<rocprofiler::hsa::AQLPacket> ret_pkt;
+    std::unique_ptr<rocprofiler::hsa::SPMPacket> ret_pkt;
     auto ret_status = info->get_spm_packet(ret_pkt, prof_config, dispatch_data, user_data);
     CHECK_EQ(ret_status, ROCPROFILER_STATUS_SUCCESS) << rocprofiler_get_status_string(ret_status);
 
@@ -209,10 +210,10 @@ pre_kernel_call(const context::context*        ctx,
         queue.create_signal(0, &signal_to_start_kfd);
         queue.create_signal(0, &signal_kfd_has_started);
 
-        get_core().hsa_signal_store_screlease_fn(signal_kfd_has_started, -1);
-        get_core().hsa_signal_store_screlease_fn(signal_to_start_kfd, 0);
+        CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table().hsa_signal_store_screlease_fn(signal_kfd_has_started, -1);
+        CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table().hsa_signal_store_screlease_fn(signal_to_start_kfd, 0);
 
-        auto status = get_ext().hsa_amd_signal_async_handler_fn(
+        auto status = CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table().hsa_amd_signal_async_handler_fn(
         signal_to_start_kfd, HSA_SIGNAL_CONDITION_EQ, -1, rocprofiler::SPM::AsyncSignalHandler, ret_pkt.get());
         ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
            << "Error: hsa_amd_signal_async_handler failed with error code " << status
@@ -244,8 +245,11 @@ post_kernel_call(const context::context*                            ctx,
             {
                 prof_config = *profile;
                 data.erase(aql_pkt.get());
-                get_core().hsa_signal_destroy_fn(aql_pkt->before_krn_pkt.at(1).barrier_and.dep_signal[0]);
-                prof_config->packets.wlock([&](auto& pkt_vector) { pkt_vector.emplace_back(std::move(aql_pkt)); });
+            
+                auto* pkt = dynamic_cast<hsa::SPMPacket*>(aql_pkt.get());
+                CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table().hsa_signal_destroy_fn(pkt->before_krn_pkt.at(1).barrier_and.dep_signal[0]);
+                pkt->kfd_stop();
+                auto rel_pkt = std::move(aql_pkt);  
                 return;
             }
         }

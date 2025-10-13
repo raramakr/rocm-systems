@@ -56,19 +56,7 @@ namespace rocprofiler
 {
 namespace SPM
 {
-CoreApiTable&
-get_core()
-{
-    static CoreApiTable api{};
-    return api;
-}
 
-AmdExtTable&
-get_ext()
-{
-    static AmdExtTable api{};
-    return api;
-}
 
 // Adds a counter collection profile to our global cache.
 // Note: these profiles can be used across multiple contexts
@@ -139,36 +127,33 @@ spm_counter_callback_info::setup_spm_counter_config(std::shared_ptr<spm_counter_
 }
 
 rocprofiler_status_t
-spm_counter_callback_info::get_spm_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& ret_pkt,
+spm_counter_callback_info::get_spm_packet(std::unique_ptr<rocprofiler::hsa::SPMPacket>& ret_pkt,
                                          std::shared_ptr<spm_counter_config>&              profile,
                                          rocprofiler_spm_dispatch_counting_service_data_t dispatch_data,
                                          rocprofiler_user_data_t* user_data)
 {
     rocprofiler_status_t status;
-    profile->packets.wlock([&](auto& pkt_vector) {
-        status = spm_counter_callback_info::setup_spm_counter_config(profile);
-        if(!pkt_vector.empty() && status == ROCPROFILER_STATUS_SUCCESS)
-        {
-            ret_pkt = std::move(pkt_vector.back());
-            pkt_vector.pop_back();
-        }
-    });
+    status = spm_counter_callback_info::setup_spm_counter_config(profile);
+    if(profile->packet && !profile->packet->empty && status == ROCPROFILER_STATUS_SUCCESS)
+    {   
+      ret_pkt = std::make_unique<rocprofiler::hsa::SPMPacket>(*(profile->packet));
+    }
+    
 
     if(!ret_pkt)
     {
         // If we do not have a packet in the cache, create one.
         ret_pkt = profile->pkt_generator->construct_packet(
-            get_core(),
-            get_ext());
-    }
+            CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
+            CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table());
+         
+       profile->packet = std::make_unique<rocprofiler::hsa::SPMPacket>(*ret_pkt);
+    };
     
-    auto* pkt = dynamic_cast<hsa::SPMPacket*>(ret_pkt.get());
-    
-   
-    pkt->dispatch_data = dispatch_data; 
-    pkt->user_data = user_data;
-    pkt->record_cb            = record_callback;
-    pkt->record_callback_args = record_callback_args;
+    ret_pkt->dispatch_data = dispatch_data; 
+    ret_pkt->user_data = user_data;
+    ret_pkt->record_cb            = record_callback;
+    ret_pkt->record_callback_args = record_callback_args;
 
     ret_pkt->clear();
     
@@ -245,10 +230,10 @@ SpmCounterController::configure_dispatch(rocprofiler_context_id_t               
     {
         ctx.dispatch_spm =
             std::make_unique<rocprofiler::context::spm_dispatch_counter_collection_service>();
+        ctx.dispatch_spm->callback = std::make_shared<spm_counter_callback_info>();
     }
 
-    auto& cb =
-        *ctx.dispatch_spm->callbacks.emplace_back(std::make_shared<spm_counter_callback_info>());
+    auto& cb = *ctx.dispatch_spm->callback;
 
     cb.user_cb       = callback;
     cb.callback_args = callback_args;
@@ -258,19 +243,6 @@ SpmCounterController::configure_dispatch(rocprofiler_context_id_t               
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
-
-void
-initialize(HsaApiTable* table)
-{
-    hsa::internal_queue::initialize(table);
-
-    assert(table->core_ && table->amd_ext_);
-    get_core() = *table->core_;
-    get_ext()  = *table->amd_ext_;
-}
-
-void
-finalize() {};
 
 }  // namespace SPM
 
