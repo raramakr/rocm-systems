@@ -63,7 +63,7 @@
 #define HIP_API_TABLE_STEP_VERSION 0
 #define HIP_COMPILER_API_TABLE_STEP_VERSION 0
 #define HIP_TOOLS_API_TABLE_STEP_VERSION 0
-#define HIP_RUNTIME_API_TABLE_STEP_VERSION 16
+#define HIP_RUNTIME_API_TABLE_STEP_VERSION 17
 
 // HIP API interface
 // HIP compiler dispatch functions
@@ -1105,6 +1105,12 @@ typedef hipError_t (*t_hipLibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t l
                                             const char* name);
 typedef hipError_t (*t_hipLibraryGetKernelCount)(unsigned int *count,
                                                  hipLibrary_t library);
+typedef hipError_t (*t_hipKernelSetAttribute)(hipFunction_attribute attrib,
+                                         int value, hipKernel_t kernel, hipDevice_t dev);
+
+typedef hipError_t (*t_hipKernelGetFunction)(hipFunction_t* pFunc, hipKernel_t kernel);
+typedef hipError_t (*t_hipDrvFuncSetAttribute)(hipFunction_t func, hipFunction_attribute attrib, int value);
+
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1683,8 +1689,13 @@ struct HipDispatchTable {
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 16
   t_hipStreamCopyAttributes hipStreamCopyAttributes_fn;
 
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION = 17
+  t_hipKernelSetAttribute hipKernelSetAttribute_fn;
+  t_hipKernelGetFunction hipKernelGetFunction_fn;
+  t_hipDrvFuncSetAttribute hipDrvFuncSetAttribute_fn;
+
   // DO NOT EDIT ABOVE!
-  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 17
+  // HIP_RUNTIME_API_TABLE_STEP_VERSION == 18
 
   // ******************************************************************************************* //
   //

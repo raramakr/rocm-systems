@@ -28,12 +28,30 @@ THE SOFTWARE.
 #include <string>
 
 #include <hip/hip_runtime.h>
-
+#include "hip_platform.hpp"
 #include "hip_code_object.hpp"
 #include "hip_fatbin.hpp"
 
 namespace hip {
 // An abstract Library container
+class LibraryKernel {
+ public:
+  LibraryKernel(const std::string&  name, int deviceId) : name_(name), deviceId_(deviceId) {
+    deviceFuncs_.resize(g_devices.size());
+  }
+  ~LibraryKernel();
+
+  const std::string& name() const { return name_; }
+  int deviceId() const { return deviceId_; }
+  std::vector<DeviceFunc*> deviceFuncs_;
+
+ private:
+  // name of kernel library
+  const std::string name_;
+  // device id this kernel is built for
+  int deviceId_;
+};
+
 class LibraryContainer {
  public:
   // Create from pointer
@@ -46,13 +64,13 @@ class LibraryContainer {
   hipError_t BuildIt();
 
   // Get the total Kernel count in Library
-  size_t KernelCount() const { return functions_.size(); }
+  hipError_t KernelCount(unsigned int* count) const {
+
+    return hip::PlatformState::instance().getFuncCount(count, module_);
+  }
 
   // Get the Kernel from name
   hipError_t Kernel(hipKernel_t* k, std::string name);
-
-  // Get Fatbin pointer
-  inline FatBinaryInfo* FatBin() { return fatbin_.get(); }
 
   // Register the kernel function, make an entry in global state
   void Register(std::string name, int device, hipKernel_t k);
@@ -66,9 +84,12 @@ class LibraryContainer {
 
   std::mutex lib_mutex_;
   std::atomic_bool built_ = false;
-  std::shared_ptr<FatBinaryInfo> fatbin_;
-  std::map<std::string, std::shared_ptr<hip::Function>> functions_;
+  hipModule_t module_;
   // Store already looked up kernels for certain devices
   std::map<std::pair<std::string /* name */, int /* device */>, hipKernel_t> kernels_;
+  
+  // Store original data to pass to DynCO
+  std::string source_filename_;
+  const void* source_image_;
 };
 }  // namespace hip

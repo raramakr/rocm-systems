@@ -517,3 +517,6 @@ hipLibraryUnload
 hipLibraryGetKernel
 hipLibraryGetKernelCount
 hipStreamCopyAttributes
+hipKernelSetAttribute
+hipKernelGetFunction
+hipDrvFuncSetAttribute

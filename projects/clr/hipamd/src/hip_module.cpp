@@ -100,7 +100,7 @@ hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
   if (mod == nullptr) {
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
-  HIP_RETURN(PlatformState::instance().getFuncCount(count, mod););
+  HIP_RETURN(PlatformState::instance().getFuncCount(count, mod));
 }
 
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
@@ -171,7 +171,7 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
       *value = 0;
       break;
     case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
-      *value = static_cast<int>(wrkGrpInfo->availableLDSSize_ - wrkGrpInfo->localMemSize_);
+      *value = static_cast<int>(wrkGrpInfo->maxDynamicSharedSizeBytes_ );
       break;
     case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
       *value = 0;
@@ -229,9 +229,55 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
       HIP_RETURN(hipErrorInvalidValue);
     }
     d_kernel->workGroupInfo()->maxDynamicSharedSizeBytes_ = value;
+    d_kernel->markAttrSet(HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES);
   }
 
   if (attr == hipFuncAttributePreferredSharedMemoryCarveout) {
+    if (value < -1 || value > 100) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipDrvFuncSetAttribute(hipFunction_t func, hipFunction_attribute attrib, int value) {
+  HIP_INIT_API(hipDrvFuncSetAttribute, func, attrib, value);
+
+  if (func == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+  if (attrib < 0 || attrib > HIP_FUNC_ATTRIBUTE_MAX) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  hipFunction_t h_func = nullptr;
+  const hip::DeviceFunc* function = nullptr;
+
+  if (PlatformState::instance().isValidDynFunc((func))) {
+    function = reinterpret_cast<const hip::DeviceFunc*>(func);
+  } else {
+      HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
+  amd::Kernel* kernel = function->kernel();
+
+  if (kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+  device::Kernel* d_kernel =
+      (device::Kernel*)(kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
+
+  if (attrib == HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES) {
+    if ((value < 0) || (value > (d_kernel->workGroupInfo()->availableLDSSize_ -
+                                 d_kernel->workGroupInfo()->localMemSize_))) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+    d_kernel->workGroupInfo()->maxDynamicSharedSizeBytes_ = value;
+    d_kernel->markAttrSet(HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES);
+  }
+
+  if (attrib == HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT) {
     if (value < -1 || value > 100) {
       HIP_RETURN(hipErrorInvalidValue);
     }

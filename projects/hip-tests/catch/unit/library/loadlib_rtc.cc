@@ -85,10 +85,12 @@ TEST_CASE("Unit_hip_library_load_rtc") {
     auto code = compile_using_hiprtc(kernel, gpu_arch);
 
     hipLibrary_t library;
-    hipKernel_t function;
+    hipKernel_t kernelone;
+    hipFunction_t function;
 
     HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-    HIP_CHECK(hipLibraryGetKernel(&function, library, "add_kernel"));
+    HIP_CHECK(hipLibraryGetKernel(&kernelone, library, "add_kernel"));
+    HIP_CHECK(hipKernelGetFunction(&function, kernelone));
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
@@ -115,10 +117,12 @@ TEST_CASE("Unit_hip_library_load_rtc") {
     auto code = compile_using_hiprtc(kernel, gpu_arch);
 
     hipLibrary_t library;
-    hipKernel_t function;
+    hipKernel_t kerneltwo;
+    hipFunction_t function;
 
     HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-    HIP_CHECK(hipLibraryGetKernel(&function, library, "sub_kernel"));
+    HIP_CHECK(hipLibraryGetKernel(&kerneltwo, library, "sub_kernel"));
+    HIP_CHECK(hipKernelGetFunction(&function, kerneltwo));
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));
@@ -145,10 +149,12 @@ TEST_CASE("Unit_hip_library_load_rtc") {
     auto code = compile_using_hiprtc(kernel, gpu_arch);
 
     hipLibrary_t library;
-    hipKernel_t function;
+    hipKernel_t kernelthree;
+    hipFunction_t function;
 
     HIP_CHECK(hipLibraryLoadData(&library, code.data(), nullptr, nullptr, 0, nullptr, nullptr, 0));
-    HIP_CHECK(hipLibraryGetKernel(&function, library, "mul_kernel"));
+    HIP_CHECK(hipLibraryGetKernel(&kernelthree, library, "mul_kernel"));
+    HIP_CHECK(hipKernelGetFunction(&function, kernelthree));
 
     unsigned int count = 0;
     HIP_CHECK(hipLibraryGetKernelCount(&count, library));

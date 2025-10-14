@@ -463,7 +463,10 @@ enum hip_api_id_t {
   HIP_API_ID_hipLibraryGetKernelCount = 443,
   HIP_API_ID_hipMemGetHandleForAddressRange = 444,
   HIP_API_ID_hipStreamCopyAttributes = 445,
-  HIP_API_ID_LAST = 445,
+  HIP_API_ID_hipKernelSetAttribute = 446,
+  HIP_API_ID_hipKernelGetFunction = 447,
+  HIP_API_ID_hipDrvFuncSetAttribute = 448,
+  HIP_API_ID_LAST = 448,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -565,6 +568,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipDeviceSynchronize: return "hipDeviceSynchronize";
     case HIP_API_ID_hipDeviceTotalMem: return "hipDeviceTotalMem";
     case HIP_API_ID_hipDriverGetVersion: return "hipDriverGetVersion";
+    case HIP_API_ID_hipDrvFuncSetAttribute: return "hipDrvFuncSetAttribute";
     case HIP_API_ID_hipDrvGraphAddMemFreeNode: return "hipDrvGraphAddMemFreeNode";
     case HIP_API_ID_hipDrvGraphAddMemcpyNode: return "hipDrvGraphAddMemcpyNode";
     case HIP_API_ID_hipDrvGraphAddMemsetNode: return "hipDrvGraphAddMemsetNode";
@@ -727,6 +731,8 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipIpcGetMemHandle: return "hipIpcGetMemHandle";
     case HIP_API_ID_hipIpcOpenEventHandle: return "hipIpcOpenEventHandle";
     case HIP_API_ID_hipIpcOpenMemHandle: return "hipIpcOpenMemHandle";
+    case HIP_API_ID_hipKernelGetFunction: return "hipKernelGetFunction";
+    case HIP_API_ID_hipKernelSetAttribute: return "hipKernelSetAttribute";
     case HIP_API_ID_hipLaunchByPtr: return "hipLaunchByPtr";
     case HIP_API_ID_hipLaunchCooperativeKernel: return "hipLaunchCooperativeKernel";
     case HIP_API_ID_hipLaunchCooperativeKernelMultiDevice: return "hipLaunchCooperativeKernelMultiDevice";
@@ -1004,6 +1010,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipDeviceSynchronize", name) == 0) return HIP_API_ID_hipDeviceSynchronize;
   if (strcmp("hipDeviceTotalMem", name) == 0) return HIP_API_ID_hipDeviceTotalMem;
   if (strcmp("hipDriverGetVersion", name) == 0) return HIP_API_ID_hipDriverGetVersion;
+  if (strcmp("hipDrvFuncSetAttribute", name) == 0) return HIP_API_ID_hipDrvFuncSetAttribute;
   if (strcmp("hipDrvGraphAddMemFreeNode", name) == 0) return HIP_API_ID_hipDrvGraphAddMemFreeNode;
   if (strcmp("hipDrvGraphAddMemcpyNode", name) == 0) return HIP_API_ID_hipDrvGraphAddMemcpyNode;
   if (strcmp("hipDrvGraphAddMemsetNode", name) == 0) return HIP_API_ID_hipDrvGraphAddMemsetNode;
@@ -1166,6 +1173,8 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipIpcGetMemHandle", name) == 0) return HIP_API_ID_hipIpcGetMemHandle;
   if (strcmp("hipIpcOpenEventHandle", name) == 0) return HIP_API_ID_hipIpcOpenEventHandle;
   if (strcmp("hipIpcOpenMemHandle", name) == 0) return HIP_API_ID_hipIpcOpenMemHandle;
+  if (strcmp("hipKernelGetFunction", name) == 0) return HIP_API_ID_hipKernelGetFunction;
+  if (strcmp("hipKernelSetAttribute", name) == 0) return HIP_API_ID_hipKernelSetAttribute;
   if (strcmp("hipLaunchByPtr", name) == 0) return HIP_API_ID_hipLaunchByPtr;
   if (strcmp("hipLaunchCooperativeKernel", name) == 0) return HIP_API_ID_hipLaunchCooperativeKernel;
   if (strcmp("hipLaunchCooperativeKernelMultiDevice", name) == 0) return HIP_API_ID_hipLaunchCooperativeKernelMultiDevice;
@@ -1668,6 +1677,11 @@ typedef struct hip_api_data_s {
       int* driverVersion;
       int driverVersion__val;
     } hipDriverGetVersion;
+    struct {
+      hipFunction_t hfunc;
+      hipFunction_attribute attrib;
+      int value;
+    } hipDrvFuncSetAttribute;
     struct {
       hipGraphNode_t* phGraphNode;
       hipGraphNode_t phGraphNode__val;
@@ -2672,6 +2686,17 @@ typedef struct hip_api_data_s {
       hipIpcMemHandle_t handle;
       unsigned int flags;
     } hipIpcOpenMemHandle;
+    struct {
+      hipFunction_t* pFunc;
+      hipFunction_t pFunc__val;
+      hipKernel_t kernel;
+    } hipKernelGetFunction;
+    struct {
+      hipFunction_attribute attrib;
+      int value;
+      hipKernel_t kernel;
+      hipDevice_t dev;
+    } hipKernelSetAttribute;
     struct {
       const void* hostFunction;
     } hipLaunchByPtr;
@@ -4323,6 +4348,12 @@ typedef struct hip_api_data_s {
 #define INIT_hipDriverGetVersion_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipDriverGetVersion.driverVersion = (int*)driverVersion; \
 };
+// hipDrvFuncSetAttribute[('hipFunction_t', 'hfunc'), ('hipFunction_attribute', 'attrib'), ('int', 'value')]
+#define INIT_hipDrvFuncSetAttribute_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipDrvFuncSetAttribute.hfunc = (hipFunction_t)func; \
+  cb_data.args.hipDrvFuncSetAttribute.attrib = (hipFunction_attribute)attrib; \
+  cb_data.args.hipDrvFuncSetAttribute.value = (int)value; \
+};
 // hipDrvGraphAddMemFreeNode[('hipGraphNode_t*', 'phGraphNode'), ('hipGraph_t', 'hGraph'), ('const hipGraphNode_t*', 'dependencies'), ('size_t', 'numDependencies'), ('hipDeviceptr_t', 'dptr')]
 #define INIT_hipDrvGraphAddMemFreeNode_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipDrvGraphAddMemFreeNode.phGraphNode = (hipGraphNode_t*)phGraphNode; \
@@ -5306,6 +5337,18 @@ typedef struct hip_api_data_s {
   cb_data.args.hipIpcOpenMemHandle.devPtr = (void**)dev_ptr; \
   cb_data.args.hipIpcOpenMemHandle.handle = (hipIpcMemHandle_t)handle; \
   cb_data.args.hipIpcOpenMemHandle.flags = (unsigned int)flags; \
+};
+// hipKernelGetFunction[('hipFunction_t*', 'pFunc'), ('hipKernel_t', 'kernel')]
+#define INIT_hipKernelGetFunction_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipKernelGetFunction.pFunc = (hipFunction_t*)pFunc; \
+  cb_data.args.hipKernelGetFunction.kernel = (hipKernel_t)kernel; \
+};
+// hipKernelSetAttribute[('hipFunction_attribute', 'attrib'), ('int', 'value'), ('hipKernel_t', 'kernel'), ('hipDevice_t', 'dev')]
+#define INIT_hipKernelSetAttribute_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipKernelSetAttribute.attrib = (hipFunction_attribute)attrib; \
+  cb_data.args.hipKernelSetAttribute.value = (int)value; \
+  cb_data.args.hipKernelSetAttribute.kernel = (hipKernel_t)kernel; \
+  cb_data.args.hipKernelSetAttribute.dev = (hipDevice_t)dev; \
 };
 // hipLaunchByPtr[('const void*', 'hostFunction')]
 #define INIT_hipLaunchByPtr_CB_ARGS_DATA(cb_data) { \
@@ -6966,6 +7009,9 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipDriverGetVersion:
       if (data->args.hipDriverGetVersion.driverVersion) data->args.hipDriverGetVersion.driverVersion__val = *(data->args.hipDriverGetVersion.driverVersion);
       break;
+// hipDrvFuncSetAttribute[('hipFunction_t', 'hfunc'), ('hipFunction_attribute', 'attrib'), ('int', 'value')]
+    case HIP_API_ID_hipDrvFuncSetAttribute:
+      break;
 // hipDrvGraphAddMemFreeNode[('hipGraphNode_t*', 'phGraphNode'), ('hipGraph_t', 'hGraph'), ('const hipGraphNode_t*', 'dependencies'), ('size_t', 'numDependencies'), ('hipDeviceptr_t', 'dptr')]
     case HIP_API_ID_hipDrvGraphAddMemFreeNode:
       if (data->args.hipDrvGraphAddMemFreeNode.phGraphNode) data->args.hipDrvGraphAddMemFreeNode.phGraphNode__val = *(data->args.hipDrvGraphAddMemFreeNode.phGraphNode);
@@ -7631,6 +7677,13 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipIpcOpenMemHandle[('void**', 'devPtr'), ('hipIpcMemHandle_t', 'handle'), ('unsigned int', 'flags')]
     case HIP_API_ID_hipIpcOpenMemHandle:
       if (data->args.hipIpcOpenMemHandle.devPtr) data->args.hipIpcOpenMemHandle.devPtr__val = *(data->args.hipIpcOpenMemHandle.devPtr);
+      break;
+// hipKernelGetFunction[('hipFunction_t*', 'pFunc'), ('hipKernel_t', 'kernel')]
+    case HIP_API_ID_hipKernelGetFunction:
+      if (data->args.hipKernelGetFunction.pFunc) data->args.hipKernelGetFunction.pFunc__val = *(data->args.hipKernelGetFunction.pFunc);
+      break;
+// hipKernelSetAttribute[('hipFunction_attribute', 'attrib'), ('int', 'value'), ('hipKernel_t', 'kernel'), ('hipDevice_t', 'dev')]
+    case HIP_API_ID_hipKernelSetAttribute:
       break;
 // hipLaunchByPtr[('const void*', 'hostFunction')]
     case HIP_API_ID_hipLaunchByPtr:
@@ -8867,6 +8920,13 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << "hipDriverGetVersion(";
       if (data->args.hipDriverGetVersion.driverVersion == NULL) oss << "driverVersion=NULL";
       else { oss << "driverVersion="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDriverGetVersion.driverVersion__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipDrvFuncSetAttribute:
+      oss << "hipDrvFuncSetAttribute(";
+      oss << "hfunc="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvFuncSetAttribute.hfunc);
+      oss << ", attrib="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvFuncSetAttribute.attrib);
+      oss << ", value="; roctracer::hip_support::detail::operator<<(oss, data->args.hipDrvFuncSetAttribute.value);
       oss << ")";
     break;
     case HIP_API_ID_hipDrvGraphAddMemFreeNode:
@@ -10199,6 +10259,21 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << "devPtr="; roctracer::hip_support::detail::operator<<(oss, data->args.hipIpcOpenMemHandle.devPtr__val); }
       oss << ", handle="; roctracer::hip_support::detail::operator<<(oss, data->args.hipIpcOpenMemHandle.handle);
       oss << ", flags="; roctracer::hip_support::detail::operator<<(oss, data->args.hipIpcOpenMemHandle.flags);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipKernelGetFunction:
+      oss << "hipKernelGetFunction(";
+      if (data->args.hipKernelGetFunction.pFunc == NULL) oss << "pFunc=NULL";
+      else { oss << "pFunc="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetFunction.pFunc__val); }
+      oss << ", kernel="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelGetFunction.kernel);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipKernelSetAttribute:
+      oss << "hipKernelSetAttribute(";
+      oss << "attrib="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetAttribute.attrib);
+      oss << ", value="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetAttribute.value);
+      oss << ", kernel="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetAttribute.kernel);
+      oss << ", dev="; roctracer::hip_support::detail::operator<<(oss, data->args.hipKernelSetAttribute.dev);
       oss << ")";
     break;
     case HIP_API_ID_hipLaunchByPtr:

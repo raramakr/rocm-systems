@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <vector>
 
 #include "hip/hip_runtime.h"
+#include "hip_code_object.hpp"
 #include "hip_library.hpp"
 #include "hip_platform.hpp"
 #include "utils/debug.hpp"
@@ -48,25 +49,24 @@ hipError_t LibraryContainer::Kernel(hipKernel_t* k, std::string name) {
     *k = ki->second;
     return hipSuccess;
   }
-  auto m = fatbin_->Module(device_id);
-  auto f = functions_.find(name);
-  if (f == functions_.end()) {
+
+  hipFunction_t f;
+  auto ret = hip::PlatformState::instance().getDynFunc(&f, module_, name.c_str());
+  if (ret != hipSuccess) {
     return hipErrorNotFound;
-  }
-  auto ret = f->second.get()->getDynFunc(reinterpret_cast<hipFunction_t*>(k), m);
-
+  }       
+  LibraryKernel* kernel = new LibraryKernel(name, device_id);
+  kernel->deviceFuncs_[device_id] = hip::DeviceFunc::asFunction(reinterpret_cast<hipFunction_t>(f));
   // Register it, basically make it available for query though the hip context.
-  Register(name, device_id, *k);
-  return hipSuccess;
+  *k = reinterpret_cast<hipKernel_t>(kernel);
+  Register(name, device_id, reinterpret_cast<hipKernel_t>(kernel));
+  return hipSuccess;  
 }
 
-LibraryContainer::LibraryContainer(const char* code_object) {
-  fatbin_ = std::make_shared<hip::FatBinaryInfo>(nullptr, code_object);
-}
+LibraryContainer::LibraryContainer(const char* code_object) : source_image_(code_object) {}
 
-LibraryContainer::LibraryContainer(const std::string file_name) {
-  fatbin_ = std::make_shared<hip::FatBinaryInfo>(file_name.c_str(), nullptr);
-}
+LibraryContainer::LibraryContainer(const std::string file_name) :
+                                   source_filename_(file_name), source_image_(nullptr) {}
 
 LibraryContainer::~LibraryContainer() {
   for (const auto& k : kernels_) {
@@ -83,24 +83,11 @@ hipError_t LibraryContainer::BuildIt() {
     return hipSuccess;
   }
 
-  if (!fatbin_) {
-    return hipErrorInvalidValue;
-  }
+  hipModule_t* module;
+  const char* fname = source_filename_.empty() ? nullptr : source_filename_.c_str();
+  const void* image = source_image_;
 
-  int device_id = ihipGetDevice();
-  std::vector<hip::Device*> devices = {g_devices[device_id]};
-  IHIP_RETURN_ONFAIL(fatbin_->ExtractFatBinaryUsingCOMGR(devices));
-  IHIP_RETURN_ONFAIL(fatbin_->BuildProgram(device_id));
-
-  auto program =
-      fatbin_->GetProgram(device_id)->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
-
-  // Process Functions
-  std::vector<std::string> function_names;
-  program->getGlobalFuncFromCodeObj(&function_names);
-  for (auto& name : function_names) {
-    functions_.emplace(std::make_pair(name, std::make_shared<hip::Function>(name)));
-  }
+  HIP_RETURN(hip::PlatformState::instance().loadModule(&module_, fname, image));
 
   built_ = true;
   return hipSuccess;
@@ -160,8 +147,8 @@ hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library) {
   if (ret != hipSuccess) {
     HIP_RETURN(ret);
   }
-  *count = static_cast<int>(l->KernelCount());
-  HIP_RETURN(hipSuccess);
+  
+  HIP_RETURN(l->KernelCount(count));
 }
 
 hipError_t hipLibraryGetKernel(hipKernel_t* kernel, hipLibrary_t library, const char* kname) {
@@ -176,5 +163,88 @@ hipError_t hipLibraryGetKernel(hipKernel_t* kernel, hipLibrary_t library, const 
   }
   ret = l->Kernel(kernel, kname);
   HIP_RETURN(ret);
+}
+
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
+  HIP_INIT_API(hipKernelSetAttribute, attrib, value, kernel, dev);
+
+  if (kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (!hip::PlatformState::instance().IsLibraryFunctionRegistered(kernel)) {
+    HIP_RETURN(hipErrorNotFound);
+  }
+  hip::LibraryKernel* libraryKernel = reinterpret_cast<hip::LibraryKernel*>(kernel);
+
+  int deviceId;
+  hipError_t error = hipGetDevice(&deviceId);
+
+  if(deviceId != dev) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  amd::Kernel* kernelFunc = libraryKernel->deviceFuncs_[deviceId]->kernel();
+  if (kernelFunc == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
+  device::Kernel* d_kernel =
+      const_cast<device::Kernel*>(kernelFunc->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
+
+  device::Kernel::WorkGroupInfo* wrkGrpInfo = d_kernel->workGroupInfo();
+
+  if (wrkGrpInfo == nullptr) {
+    HIP_RETURN(hipErrorMissingConfiguration);
+  }
+
+  switch (attrib) {
+    case HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES:
+      if (value > (hip::getCurrentDevice()->devices()[0]->info().localMemSize_)) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      wrkGrpInfo->localMemSize_ = static_cast<size_t>(value);
+      break;
+    /* Read Only*/
+    case HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK:
+    case HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
+    case HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
+    case HIP_FUNC_ATTRIBUTE_NUM_REGS:
+    case HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA:
+    case HIP_FUNC_ATTRIBUTE_PTX_VERSION:
+    case HIP_FUNC_ATTRIBUTE_BINARY_VERSION:
+      HIP_RETURN(hipErrorInvalidValue);
+      break;
+    case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
+      if ((value < 0) || (value > (wrkGrpInfo->availableLDSSize_ - wrkGrpInfo->localMemSize_))) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      if(!d_kernel->isAttrSet(HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES)) {
+        wrkGrpInfo->maxDynamicSharedSizeBytes_ = value;
+      }
+      d_kernel->workGroupInfoKernelAttribute()->maxDynamicSharedSizeBytes_ = value;
+      break;
+    case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
+      break;
+    default:
+      HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
+  HIP_INIT_API(hipKernelGetFunction, pFunc, kernel);
+
+  if (pFunc == nullptr || kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (!hip::PlatformState::instance().IsLibraryFunctionRegistered(kernel)) {
+    HIP_RETURN(hipErrorNotFound);
+  }
+  hip::LibraryKernel* libraryKernel = reinterpret_cast<hip::LibraryKernel*>(kernel);
+  *pFunc = libraryKernel->deviceFuncs_[hip::getCurrentDevice()->deviceId()]->asHipFunction();
+  if (*pFunc == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+  HIP_RETURN(hipSuccess);
 }
 }  // namespace hip

@@ -3669,6 +3669,18 @@ inline static hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrar
   return hipCUResultTohipError(cuLibraryGetKernelCount(count, library));
 }
 
+inline static hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
+  return hipCUResultTohipError(cuKernelSetAttribute(attrib, value, kernel, dev));
+}
+
+inline static hipError_t hipDrvFuncSetAttribute(hipFunction_t hfunc, hipFunction_attribute attrib, int value) {
+  return hipCUResultTohipError(cuFuncSetAttribute(hfunc, attrib, value));
+}
+
+inline static hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
+  return hipCUResultTohipError(cuKernelGetFunction(pFunc, kernel));
+}
+
 inline static hipError_t hipLaunchKernel(const void* function_address, dim3 numBlocks,
                                          dim3 dimBlocks, void** args, size_t sharedMemBytes,
                                          hipStream_t stream) {

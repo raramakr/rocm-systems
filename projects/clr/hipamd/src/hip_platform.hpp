@@ -130,6 +130,11 @@ class PlatformState {
     return false;
   }
 
+  inline bool IsLibraryFunctionRegistered(const hipKernel_t f) {
+    amd::ScopedLock lock(lock_);
+    return library_functions_.find(f) != library_functions_.end();
+  }
+
  private:
   // Dynamic Code Object map, keyin module to get the corresponding object
   std::unordered_map<hipModule_t, hip::DynCO*> dynCO_map_;

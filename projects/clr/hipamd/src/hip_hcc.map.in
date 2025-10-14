@@ -639,6 +639,9 @@ global:
     hipLibraryGetKernel;
     hipLibraryGetKernelCount;
     hipStreamCopyAttributes;
+    hipKernelSetAttribute;
+    hipKernelGetFunction;
+    hipDrvFuncSetAttribute;
 local:
     *;
 } hip_7.1;

@@ -234,7 +234,11 @@ class Kernel : public amd::HeapObject {
     bool isWGPMode_;             //!< kernel compiled in WGP/cumode
     bool uniformWorkGroupSize_;  //!< uniform work group size option
   };
-
+  
+  struct WorkGroupInfoKernelAttribute : public amd::EmbeddedObject {
+    uint64_t localMemSize_;         //!< amount of used local memory
+    size_t maxDynamicSharedSizeBytes_;
+  };
   //! Default constructor
   Kernel(const amd::Device& dev, const std::string& name, const Program& prog);
 
@@ -245,6 +249,23 @@ class Kernel : public amd::HeapObject {
   const WorkGroupInfo* workGroupInfo() const { return &workGroupInfo_; }
   //! Returns the kernel info structure for filling in
   WorkGroupInfo* workGroupInfo() { return &workGroupInfo_; }
+
+    //! Returns the kernel info structure
+  const WorkGroupInfoKernelAttribute* workGroupInfoKernelAttribute() const { return &workGroupInfoKernelAttribute_; }
+  //! Returns the kernel info structure for filling in
+  WorkGroupInfoKernelAttribute* workGroupInfoKernelAttribute() { return &workGroupInfoKernelAttribute_; }
+
+  static constexpr uint32_t attrBit(uint32_t a) {
+  return (a >= 0 && a < 32) ? (1u << a) : 0u;
+  }
+  bool isAttrSet(uint32_t a) const {
+    const auto bit = attrBit(a);
+    return bit ? (attrSetMask_.load(std::memory_order_relaxed) & bit) != 0 : false;
+  }
+  void markAttrSet(uint32_t a) {
+    const auto bit = attrBit(a);
+    if (bit) attrSetMask_.fetch_or(bit, std::memory_order_relaxed);
+  }
 
   //! Returns the kernel signature
   const amd::KernelSignature& signature() const { return *signature_; }
@@ -387,6 +408,7 @@ class Kernel : public amd::HeapObject {
   const Program& prog_;              //!< Reference to the parent program
   std::string symbolName_;           //!< kernel symbol name
   WorkGroupInfo workGroupInfo_;      //!< device kernel info structure
+  WorkGroupInfoKernelAttribute workGroupInfoKernel_;  //!< device kernel info structure dedicated for kernel attribute
   amd::KernelSignature* signature_;  //!< kernel signature
   std::string buildLog_;             //!< build log
   std::vector<PrintfInfo> printf_;   //!< Format strings for GPU printf support
@@ -398,6 +420,8 @@ class Kernel : public amd::HeapObject {
   uint32_t kernargSegmentByteSize_ = 0;  //!< Size of kernel argument buffer
   uint32_t kernargSegmentAlignment_ = 0;
   bool kernelHasDynamicCallStack_ = 0;
+  std::atomic<uint32_t> attrSetMask_{0};      //!< kernel attribute is set by function attribute
+  WorkGroupInfoKernelAttribute workGroupInfoKernelAttribute_;
 
   union Flags {
     struct {
