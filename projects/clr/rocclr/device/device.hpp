@@ -670,7 +670,7 @@ struct Info : public amd::EmbeddedObject {
 };
 
 //! Device settings
-class Settings : public amd::HeapObject {
+class Settings {
  public:
   enum KernelArgImpl {
     HostKernelArgs = 0,        //!< Kernel Arguments are put into host memory
@@ -737,7 +737,7 @@ class Settings : public amd::HeapObject {
 
 //! Device-independent cache memory, base class for the device-specific
 //! memories. One Memory instance refers to one or more of these.
-class Memory : public amd::HeapObject {
+class Memory {
  public:
   //! Resource map flags
   enum CpuMapFlags {
@@ -763,7 +763,7 @@ class Memory : public amd::HeapObject {
     SyncFlags() : value_(0) {}
   };
 
-  struct WriteMapInfo : public amd::HeapObject {
+  struct WriteMapInfo {
     amd::Coord3D origin_;  //!< Origin of the map location
     amd::Coord3D region_;  //!< Mapped region
     amd::Image* baseMip_;  //!< The base mip level for images
@@ -1003,7 +1003,7 @@ class Memory : public amd::HeapObject {
   Memory(const Memory&) = delete;
 };
 
-class Sampler : public amd::HeapObject {
+class Sampler {
  public:
   //! Constructor
   Sampler() : hwSrd_(0), hwState_(nullptr) {}
@@ -1029,7 +1029,7 @@ class Sampler : public amd::HeapObject {
   Sampler(const Sampler&);
 };
 
-class ClBinary : public amd::HeapObject {
+class ClBinary {
  public:
   enum BinaryImageFormat {
     BIF_VERSION2 = 0,  //!< Binary Image Format version 2.0 (ELF)
@@ -1238,7 +1238,7 @@ inline Program::binary_t Program::binary() {
  *
  *  \brief The device interface class for the performance counters
  */
-class PerfCounter : public amd::HeapObject {
+class PerfCounter {
  public:
   //! Constructor for the device performance
   PerfCounter() {}
@@ -1260,7 +1260,7 @@ class PerfCounter : public amd::HeapObject {
  *
  *  \brief The device interface class for the performance counters
  */
-class ThreadTrace : public amd::HeapObject {
+class ThreadTrace {
  public:
   //! Constructor for the device performance
   ThreadTrace() {}
@@ -1280,7 +1280,7 @@ class ThreadTrace : public amd::HeapObject {
 };
 
 //! A device execution environment.
-class VirtualDevice : public amd::HeapObject {
+class VirtualDevice {
  public:
   //! Construct a new virtual device for the given physical device.
   VirtualDevice(amd::Device& device)
@@ -1677,7 +1677,7 @@ class Device : public RuntimeObject {
 
   typedef std::list<CommandQueue*> CommandQueues;
 
-  struct BlitProgram : public amd::HeapObject {
+  struct BlitProgram {
     Program* program_;  //!< GPU program object
     Context* context_;  //!< A dummy context
 
