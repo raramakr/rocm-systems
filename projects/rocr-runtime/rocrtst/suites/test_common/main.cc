@@ -58,11 +58,9 @@
 #include "suites/functional/memory_allocation.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
-#include "suites/functional/svm_memory.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
 #include "suites/performance/memory_async_copy_numa.h"
-#include "suites/performance/memory_async_copy_on_engine.h"
 #include "suites/performance/enqueueLatency.h"
 #include "suites/negative/memory_allocate_negative_tests.h"
 #include "suites/negative/queue_validation.h"
@@ -79,7 +77,10 @@
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
-#include "amd_smi/amdsmi.h"
+#include "suites/image/mipmap_3Darray.h"
+#include "suites/image/mipmap_2Darray.h"
+#include "suites/image/mipmap_1Darray.h"
+#include "rocm_smi/rocm_smi.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 
@@ -137,13 +138,6 @@ TEST(rocrtstFunc, MemoryAccessTests) {
   RunCustomTestProlog(&mt);
   mt.CPUAccessToGPUMemoryTest();
   mt.GPUAccessToCPUMemoryTest();
-  RunCustomTestEpilog(&mt);
-}
-
-TEST(rocrtstFunc, MemoryAccessCoherent) {
-  MemoryAccessTest mt;
-  RunCustomTestProlog(&mt);
-  mt.MemoryAccessCoherentTest();
   RunCustomTestEpilog(&mt);
 }
 
@@ -391,14 +385,6 @@ TEST(rocrtstFunc, AgentPropertiesTests) {
   RunCustomTestEpilog(&propTest);
 }
 
-TEST(rocrtstFunc, SvmMemory_Basic_Test) {
-  SvmMemoryTestBasic smt;
-
-  RunCustomTestProlog(&smt);
-  smt.TestCreateDestroy();
-  RunCustomTestEpilog(&smt);
-}
-
 TEST(rocrtstFunc, VirtMemory_Basic_Test) {
   VirtMemoryTestBasic vmt;
 
@@ -515,6 +501,49 @@ TEST(rocrtstStress, Queue_LoadStore_Write_Index_ConcurrentTest) {
   RunCustomTestEpilog(&Qw);
 }
 
+// Image Tests
+TEST(rocrtstImages, Mipmap_1DArray_CreateDestroy_Test) {
+  Mipmap1DArrayTest mat1D;
+  RunCustomTestProlog(&mat1D);
+  mat1D.MipmapCreateDestroy1DArrayTest();
+  RunCustomTestEpilog(&mat1D);
+}
+
+TEST(rocrtstImages, Mipmap_1DArray_Get_Level_Test) {
+  Mipmap1DArrayTest mat1D;
+  RunCustomTestProlog(&mat1D);
+  mat1D.MipmapGetLevel1DArrayTest();
+  RunCustomTestEpilog(&mat1D);
+}
+
+TEST(rocrtstImages, Mipmap_2DArray_CreateDestroy_Test) {
+  Mipmap2DArrayTest mat2D;
+  RunCustomTestProlog(&mat2D);
+  mat2D.MipmapCreateDestroy2DArrayTest();
+  RunCustomTestEpilog(&mat2D);
+}
+
+TEST(rocrtstImages, Mipmap_2DArray_Get_Level_Test) {
+  Mipmap2DArrayTest mat2D;
+  RunCustomTestProlog(&mat2D);
+  mat2D.MipmapGetLevel2DArrayTest();
+  RunCustomTestEpilog(&mat2D);
+}
+
+TEST(rocrtstImages, Mipmap_3DArray_CreateDestroy_Test) {
+  Mipmap3DArrayTest mat3D;
+  RunCustomTestProlog(&mat3D);
+  mat3D.MipmapCreateDestroy3DArrayTest();
+  RunCustomTestEpilog(&mat3D);
+}
+
+TEST(rocrtstImages, Mipmap_3DArray_Get_Level_Test) {
+  Mipmap3DArrayTest mat3D;
+  RunCustomTestProlog(&mat3D);
+  mat3D.MipmapGetLevel3DArrayTest();
+  RunCustomTestEpilog(&mat3D);
+}
+
 TEST(rocrtstPerf, Memory_Async_Copy) {
   MemoryAsyncCopy mac;
   // To do full test, uncomment this:
@@ -526,12 +555,6 @@ TEST(rocrtstPerf, Memory_Async_Copy) {
   // another gpu
   RunGenericTest(&mac);
 }
-
-TEST(rocrtstPerf, Memory_Async_Copy_On_Engine) {
-  MemoryAsyncCopyOnEngine mac;
-  RunGenericTest(&mac);
-}
-
 #endif  // ROCRTST_EMULATOR_BUILD
 
 TEST(rocrtstPerf, ENQUEUE_LATENCY) {
@@ -586,9 +609,9 @@ int main(int argc, char** argv) {
   sRocrtstGlvalues = &settings;
 
   if (settings.monitor_verbosity > 0) {
-    amdsmi_status_t amdsmi_ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
-    if (amdsmi_ret != AMDSMI_STATUS_SUCCESS) {
-      std::cout << "Failed to initialize AMD smi" << std::endl;
+    rsmi_status_t rsmi_ret = rsmi_init(0);
+    if (rsmi_ret != RSMI_STATUS_SUCCESS) {
+      std::cout << "Failed to initialize ROCm smi" << std::endl;
       return 1;
     }
     DumpMonitorInfo();
