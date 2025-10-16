@@ -88,6 +88,7 @@ ASSERT_SIZE_UINT32(SQ_IMG_SAMP_WORD3)
 hsa_status_t ImageManagerAi::CalculateImageSizeAndAlignment(
     hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
     hsa_ext_image_data_layout_t image_data_layout,
+    uint32_t num_mipmap_levels,
     size_t image_data_row_pitch,
     size_t image_data_slice_pitch,
     hsa_ext_image_data_info_t& image_info) const {
@@ -103,8 +104,8 @@ hsa_status_t ImageManagerAi::CalculateImageSizeAndAlignment(
                 desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB)?
       Image::TileMode::TILED : Image::TileMode::LINEAR;
   }
-  if (GetAddrlibSurfaceInfoAi(component, desc, tileMode,
-        image_data_row_pitch, image_data_slice_pitch, out) == (uint32_t)(-1)) {
+  if (GetAddrlibSurfaceInfoAi(component, desc, num_mipmap_levels, tileMode,
+      image_data_row_pitch, image_data_slice_pitch, out) == (uint32_t)(-1)) {
     return HSA_STATUS_ERROR;
   }
 
@@ -342,8 +343,8 @@ hsa_status_t ImageManagerAi::PopulateImageSrd(Image& image) const {
 
     ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
 
-    uint32_t swizzleMode = GetAddrlibSurfaceInfoAi(image.component, image.desc, image.tile_mode,
-          image.row_pitch, image.slice_pitch, out);
+    uint32_t swizzleMode = GetAddrlibSurfaceInfoAi(image.component, image.desc,
+                  1, image.tile_mode, image.row_pitch, image.slice_pitch, out);
     if (swizzleMode == (uint32_t)(-1)) {
       return HSA_STATUS_ERROR;
     }
@@ -500,6 +501,7 @@ hsa_status_t ImageManagerAi::PopulateSamplerSrd(Sampler& sampler) const {
 
 uint32_t ImageManagerAi::GetAddrlibSurfaceInfoAi(
     hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
+    uint32_t num_mipmap_levels,
     Image::TileMode tileMode,
     size_t image_data_row_pitch,
     size_t image_data_slice_pitch,
@@ -522,6 +524,7 @@ uint32_t ImageManagerAi::GetAddrlibSurfaceInfoAi(
   in.width = width;
   in.height = height;
   in.numSlices = num_slice;
+  in.numMipLevels = num_mipmap_levels;
   in.pitchInElement = image_data_row_pitch / image_prop.element_size;
   switch(desc.geometry) {
   case HSA_EXT_IMAGE_GEOMETRY_1D:
@@ -610,6 +613,145 @@ uint32_t ImageManagerAi::GetAddrlibSurfaceInfoAi(
   }
 
   return in.swizzleMode;
+}
+
+hsa_status_t ImageManagerAi::PopulateMipmapSrd(MipmappedArray& mipmap) const {
+  ImageProperty mipmap_prop = ImageLut().MapFormat(mipmap.desc.format, mipmap.desc.geometry);
+  assert(mipmap_prop.cap != HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED);
+  assert(mipmap_prop.element_size != 0);
+  assert(mipmap.num_levels >= 1);
+
+  const void* mipmap_data_addr = mipmap.data;
+
+  if (IsLocalMemory(mipmap.data))
+    mipmap_data_addr = reinterpret_cast<const void*>(
+        reinterpret_cast<uintptr_t>(mipmap.data) - local_memory_base_address_);
+
+  if (mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
+    sq_buf_rsrc_word0_u word0;
+    sq_buf_rsrc_word1_u word1;
+    sq_buf_rsrc_word2_u word2;
+    sq_buf_rsrc_word3_u word3;
+
+    word0.val = 0;
+    word0.f.base_address = PtrLow32(mipmap_data_addr);
+
+    word1.val = 0;
+    word1.f.base_address_hi = PtrHigh32(mipmap_data_addr);
+    word1.f.stride = mipmap_prop.element_size;
+    word1.f.swizzle_enable = false;
+    word1.f.cache_swizzle = false;
+
+    word2.val = 0;
+    word2.f.num_records = mipmap.desc.width * mipmap_prop.element_size;
+
+    const Swizzle swizzle = ImageLut().MapSwizzle(mipmap.desc.format.channel_order);
+    word3.val = 0;
+    word3.f.dst_sel_x = swizzle.x;
+    word3.f.dst_sel_y = swizzle.y;
+    word3.f.dst_sel_z = swizzle.z;
+    word3.f.dst_sel_w = swizzle.w;
+    word3.f.num_format = mipmap_prop.data_type;
+    word3.f.data_format = mipmap_prop.data_format;
+    word3.f.index_stride = mipmap_prop.element_size;
+    word3.f.type = ImageLut().MapGeometry(mipmap.desc.geometry);
+
+    mipmap.srd[0] = word0.val;
+    mipmap.srd[1] = word1.val;
+    mipmap.srd[2] = word2.val;
+    mipmap.srd[3] = word3.val;
+
+    mipmap.row_pitch = mipmap.desc.width * mipmap_prop.element_size;
+    mipmap.slice_pitch = mipmap.row_pitch;
+  } else {
+    sq_img_rsrc_word0_u word0;
+    sq_img_rsrc_word1_u word1;
+    sq_img_rsrc_word2_u word2;
+    sq_img_rsrc_word3_u word3;
+    sq_img_rsrc_word4_u word4;
+    sq_img_rsrc_word5_u word5;
+    sq_img_rsrc_word6_u word6;
+    sq_img_rsrc_word7_u word7;
+
+    ADDR2_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
+    uint32_t swizzleMode = GetAddrlibSurfaceInfoAi(
+                        mipmap.component, mipmap.desc, mipmap.num_levels,
+                        mipmap.tile_mode, mipmap.row_pitch, mipmap.slice_pitch, out);
+    if (swizzleMode == (uint32_t)(-1)) {
+      return HSA_STATUS_ERROR;
+    }
+    mipmap.addr_output.addr2 = out;
+    mipmap.size = out.surfSize;
+
+    assert((out.bpp / 8) == mipmap_prop.element_size);
+
+    const size_t row_pitch_size = out.pitch * mipmap_prop.element_size;
+
+    word0.f.base_address = PtrLow40Shift8(mipmap_data_addr);
+
+    word1.val = 0;
+    word1.f.base_address_hi = PtrHigh64Shift40(mipmap_data_addr);
+    word1.f.min_lod = 0;
+    word1.f.data_format = mipmap_prop.data_format;
+    word1.f.num_format = mipmap_prop.data_type;
+
+    word2.val = 0;
+    word2.f.width = mipmap.desc.width - 1;
+    word2.f.height = mipmap.desc.height - 1;
+    word2.f.perf_mod = 0;
+
+    const Swizzle swizzle = ImageLut().MapSwizzle(mipmap.desc.format.channel_order);
+    word3.val = 0;
+    word3.f.dst_sel_x = swizzle.x;
+    word3.f.dst_sel_y = swizzle.y;
+    word3.f.dst_sel_z = swizzle.z;
+    word3.f.dst_sel_w = swizzle.w;
+    word3.f.sw_mode = swizzleMode;
+    word3.f.type = ImageLut().MapGeometry(mipmap.desc.geometry);
+
+    const bool mipmap_array =
+        (mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ||
+         mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DA ||
+         mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DADEPTH);
+    const bool mipmap_3d = (mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_3D);
+
+    word4.val = 0;
+    word4.f.depth =
+        (mipmap_array)
+            ? std::max(mipmap.desc.array_size, static_cast<size_t>(1)) - 1
+            : (mipmap_3d) ? mipmap.desc.depth - 1 : 0;
+    word4.f.pitch = out.pitch - 1;
+    word4.f.bc_swizzle = GetBcSwizzle(swizzle);
+
+    word5.val = 0;
+    word6.val = 0;
+    word7.val = 0;
+
+    mipmap.srd[0] = word0.val;
+    mipmap.srd[1] = word1.val;
+    mipmap.srd[2] = word2.val;
+    mipmap.srd[3] = word3.val;
+    mipmap.srd[4] = word4.val;
+    mipmap.srd[5] = word5.val;
+    mipmap.srd[6] = word6.val;
+    mipmap.srd[7] = word7.val;
+
+    mipmap.row_pitch = row_pitch_size;
+    mipmap.slice_pitch = out.sliceSize;
+  }
+
+  mipmap.srd[8] = mipmap.desc.format.channel_type;
+  mipmap.srd[9] = mipmap.desc.format.channel_order;
+  mipmap.srd[10] = static_cast<uint32_t>(mipmap.desc.width);
+
+  // Mipmap-specific auxiliary fields
+  mipmap.srd[11] = mipmap.num_levels;
+  mipmap.srd[12] = static_cast<uint32_t>(mipmap.desc.height); // Base height
+  mipmap.srd[13] = static_cast<uint32_t>(mipmap.desc.depth);  // Base depth
+  mipmap.srd[14] = 0;
+  mipmap.srd[15] = 0;
+
+  return HSA_STATUS_SUCCESS;
 }
 
 }  // namespace image

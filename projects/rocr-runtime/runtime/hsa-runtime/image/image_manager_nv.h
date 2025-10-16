@@ -59,6 +59,7 @@ class ImageManagerNv : public ImageManagerKv {
   virtual hsa_status_t CalculateImageSizeAndAlignment(
       hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
       hsa_ext_image_data_layout_t image_data_layout,
+      uint32_t num_mipmap_levels,
       size_t image_data_row_pitch, size_t image_data_slice_pitch,
       hsa_ext_image_data_info_t& image_info) const;
 
@@ -79,13 +80,18 @@ class ImageManagerNv : public ImageManagerKv {
   /// @brief Fill image backing storage using agent copy.
   virtual hsa_status_t FillImage(const Image& image, const void* pattern,
                                  const hsa_ext_image_region_t& region);
+
+  /// @brief Fill mipmap structure with device specific mipmapped array object.
+  virtual hsa_status_t PopulateMipmapSrd(MipmappedArray& mipmap_array) const;
+
  protected:
   uint32_t GetAddrlibSurfaceInfoNv(hsa_agent_t component,
-                             const hsa_ext_image_descriptor_t& desc,
-                             Image::TileMode tileMode,
-                             size_t image_data_row_pitch,
-                             size_t image_data_slice_pitch,
-                             ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out) const;
+                                  const hsa_ext_image_descriptor_t& desc,
+                                  uint32_t num_mipmap_levels,
+                                  Image::TileMode tileMode,
+                                  size_t image_data_row_pitch,
+                                  size_t image_data_slice_pitch,
+                                  ADDR2_COMPUTE_SURFACE_INFO_OUTPUT& out) const;
 
   bool IsLocalMemory(const void* address) const;
 

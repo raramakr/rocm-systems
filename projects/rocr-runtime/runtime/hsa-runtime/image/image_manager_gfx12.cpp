@@ -217,12 +217,19 @@ ImageManagerGfx12::~ImageManagerGfx12() {}
 hsa_status_t ImageManagerGfx12::CalculateImageSizeAndAlignment(
     hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
     hsa_ext_image_data_layout_t image_data_layout,
+    uint32_t num_mipmap_levels,
     size_t image_data_row_pitch,
     size_t image_data_slice_pitch,
     hsa_ext_image_data_info_t& image_info) const {
-  ADDR3_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
-  hsa_profile_t profile;
 
+  ADDR3_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
+  std::vector<ADDR3_MIP_INFO> mip_info_storage;
+  mip_info_storage.resize(num_mipmap_levels);
+
+  // Assign pointer to allocated memory
+  out.pMipInfo = mip_info_storage.empty() ? nullptr : mip_info_storage.data();
+
+  hsa_profile_t profile;
   hsa_status_t status = HSA::hsa_agent_get_info(component, HSA_AGENT_INFO_PROFILE, &profile);
   if (status != HSA_STATUS_SUCCESS) return status;
 
@@ -232,9 +239,8 @@ hsa_status_t ImageManagerGfx12::CalculateImageSizeAndAlignment(
                 desc.geometry != HSA_EXT_IMAGE_GEOMETRY_1DB)?
       Image::TileMode::TILED : Image::TileMode::LINEAR;
   }
-  if (GetAddrlibSurfaceInfoNv(component, desc, tileMode,
-        image_data_row_pitch, image_data_slice_pitch, out) ==
-                                                             (uint32_t)(-1)) {
+  if (GetAddrlibSurfaceInfoNv(component, desc, num_mipmap_levels, tileMode,
+      image_data_row_pitch, image_data_slice_pitch, out) == (uint32_t)(-1)) {
     return HSA_STATUS_ERROR;
   }
 
@@ -431,7 +437,6 @@ hsa_status_t ImageManagerGfx12::PopulateImageSrd(Image& image) const {
     word1.val = 0;
     word1.f.BASE_ADDRESS_HI = PtrHigh32(image_data_addr);
     word1.f.STRIDE = image_prop.element_size;
-
     word1.f.SWIZZLE_ENABLE = 0;
 
     word2.f.NUM_RECORDS = image.desc.width * image_prop.element_size;
@@ -472,9 +477,8 @@ hsa_status_t ImageManagerGfx12::PopulateImageSrd(Image& image) const {
 
     ADDR3_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
 
-    uint32_t swizzleMode = GetAddrlibSurfaceInfoNv(
-         image.component, image.desc, image.tile_mode,
-                                     image.row_pitch, image.slice_pitch, out);
+    uint32_t swizzleMode = GetAddrlibSurfaceInfoNv(image.component, image.desc,
+                  1, image.tile_mode, image.row_pitch, image.slice_pitch, out);
     if (swizzleMode == (uint32_t)(-1)) {
       return HSA_STATUS_ERROR;
     }
@@ -643,6 +647,7 @@ hsa_status_t ImageManagerGfx12::PopulateSamplerSrd(Sampler& sampler) const {
 
 uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
     hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
+    uint32_t num_mipmap_levels,
     Image::TileMode tileMode,
     size_t image_data_row_pitch,
     size_t image_data_slice_pitch,
@@ -666,6 +671,7 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
   in.height = height;
   in.numSlices = num_slice;
   in.pitchInElement = image_data_row_pitch / image_prop.element_size;
+  in.numMipLevels = num_mipmap_levels;
 
   switch (desc.geometry) {
     case HSA_EXT_IMAGE_GEOMETRY_1D:
@@ -673,46 +679,44 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
     case HSA_EXT_IMAGE_GEOMETRY_1DA:
       in.resourceType = ADDR_RSRC_TEX_1D;
       break;
-
     case HSA_EXT_IMAGE_GEOMETRY_2D:
     case HSA_EXT_IMAGE_GEOMETRY_2DDEPTH:
     case HSA_EXT_IMAGE_GEOMETRY_2DA:
     case HSA_EXT_IMAGE_GEOMETRY_2DADEPTH:
       in.resourceType = ADDR_RSRC_TEX_2D;
       break;
-
     case HSA_EXT_IMAGE_GEOMETRY_3D:
+    {
+      in.resourceType = ADDR_RSRC_TEX_3D;
+      /*
+      * 3D swizzle modes on GFX12 enforces alignment
+      * of the number of slices  to the block depth.
+      * If numSlices = 3 then the 3 slices are
+      * interleaved for 3D locality among the 8 slices
+      * that make up each block. This causes the memory
+      * footprint to jump from an ideal size of ~12 GB
+      * to ~32 GB.
+      * 'enable3DSwizzleMode' flag tests for env variable
+      * HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG to enable or disable
+      * 3D swizzle:
+      * true: Keep view3dAs2dArray = 0 for real 3D interleaving.
+      * false: Use view3dAs2dArray = 1 to avoid the alignment
+      *       expansion.
+      * 2D swizzle modes can lower size overhead but may yield
+      * suboptimal cache behavior for fully 3D volumetric
+      * operations.
+      */
+      bool enable3DSwizzleMode = core::Runtime::runtime_singleton_->flag().enable_3d_swizzle();
+      if (enable3DSwizzleMode)
       {
-	in.resourceType = ADDR_RSRC_TEX_3D;
-	/*
-	 * 3D swizzle modes on GFX12 enforces alignment
-	 * of the number of slices  to the block depth.
-	 * If numSlices = 3 then the 3 slices are
-	 * interleaved for 3D locality among the 8 slices
-	 * that make up each block. This causes the memory
-	 * footprint to jump from an ideal size of ~12 GB
-	 * to ~32 GB.
-	 * 'enable3DSwizzleMode' flag tests for env variable
-	 * HSA_IMAGE_ENABLE_3D_SWIZZLE_DEBUG to enable or disable
-	 * 3D swizzle:
-	 * true: Keep view3dAs2dArray = 0 for real 3D interleaving.
-	 * false: Use view3dAs2dArray = 1 to avoid the alignment
-	 *       expansion.
-	 * 2D swizzle modes can lower size overhead but may yield
-	 * suboptimal cache behavior for fully 3D volumetric
-	 * operations.
-	 */
-	bool enable3DSwizzleMode = core::Runtime::runtime_singleton_->flag().enable_3d_swizzle();
-	if (enable3DSwizzleMode)
-	{
-		in.flags.view3dAs2dArray = 0;
-	}
-	else
-	{
-		in.flags.view3dAs2dArray = 1;
-	}
-	break;
+        in.flags.view3dAs2dArray = 0;
       }
+      else
+      {
+        in.flags.view3dAs2dArray = 1;
+      }
+      break;
+    }
   }
 
   in.flags.texture = 1;
@@ -794,6 +798,9 @@ uint32_t ImageManagerGfx12::GetAddrlibSurfaceInfoNv(
 
       if (swOut.validModes.value & (1 << i)) {
         ADDR3_COMPUTE_SURFACE_INFO_OUTPUT localOut = {0};
+        std::vector<ADDR3_MIP_INFO> mip_info_storage;
+        mip_info_storage.resize(num_mipmap_levels);
+        localOut.pMipInfo = mip_info_storage.empty() ? nullptr : mip_info_storage.data();
         localOut.size = sizeof(ADDR3_COMPUTE_SURFACE_INFO_OUTPUT);
 
         in.swizzleMode = (Addr3SwizzleMode) i;
@@ -907,6 +914,176 @@ hsa_status_t ImageManagerGfx12::FillImage(const Image& image, const void* patter
   }
 
   return status;
+}
+
+hsa_status_t ImageManagerGfx12::PopulateMipmapSrd(MipmappedArray& mipmap) const {
+  // Map format/geometry to hardware encoding
+  ImageProperty mipmap_prop = ImageLut().MapFormat(mipmap.desc.format, mipmap.desc.geometry);
+  assert(mipmap_prop.cap != HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED);
+  assert(mipmap_prop.element_size != 0);
+  assert(mipmap.num_levels >= 1);
+
+  const void* mipmap_data_addr = mipmap.data;
+  uint32_t major_ver = MajorVerFromDevID(chip_id_);
+
+  if (IsLocalMemory(mipmap.data)) {
+    mipmap_data_addr = reinterpret_cast<const void*>(
+        reinterpret_cast<uintptr_t>(mipmap.data) - local_memory_base_address_);
+  }
+
+  if (mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
+    SQ_BUF_RSRC_WORD0 word0;
+    SQ_BUF_RSRC_WORD1 word1;
+    SQ_BUF_RSRC_WORD2 word2;
+    SQ_BUF_RSRC_WORD3 word3;
+
+    word0.val = 0;
+    word0.f.BASE_ADDRESS = PtrLow32(mipmap_data_addr);
+
+    word1.val = 0;
+    word1.f.BASE_ADDRESS_HI = PtrHigh32(mipmap_data_addr);
+    word1.f.STRIDE = mipmap_prop.element_size;
+    word1.f.SWIZZLE_ENABLE = 0;
+
+    word2.val = 0;
+    word2.f.NUM_RECORDS = mipmap.desc.width * mipmap_prop.element_size;
+
+    const Swizzle swizzle = ImageLut().MapSwizzle(mipmap.desc.format.channel_order);
+    word3.val = 0;
+    word3.f.DST_SEL_X = swizzle.x;
+    word3.f.DST_SEL_Y = swizzle.y;
+    word3.f.DST_SEL_Z = swizzle.z;
+    word3.f.DST_SEL_W = swizzle.w;
+    word3.f.FORMAT = GetCombinedFormat(mipmap_prop.data_format, mipmap_prop.data_type);
+    word3.f.INDEX_STRIDE = mipmap_prop.element_size;
+
+    // GFX12 compression features (disabled for now)
+    // word3.f.WRITE_COMPRESS_ENABLE = 0;
+    // word3.f.COMPRESSION_EN = 0;
+    // word3.f.COMPRESSION_ACCESS_MODE = 0;
+
+    word3.f.TYPE = ImageLut().MapGeometry(mipmap.desc.geometry);
+
+    mipmap.srd[0] = word0.val;
+    mipmap.srd[1] = word1.val;
+    mipmap.srd[2] = word2.val;
+    mipmap.srd[3] = word3.val;
+
+    // 1DB mipmaps don't use words 4-7
+    mipmap.srd[4] = 0;
+    mipmap.srd[5] = 0;
+    mipmap.srd[6] = 0;
+    mipmap.srd[7] = 0;
+
+    mipmap.row_pitch = mipmap.desc.width * mipmap_prop.element_size;
+    mipmap.slice_pitch = mipmap.row_pitch;
+  } else {
+    SQ_IMG_RSRC_WORD0 word0;
+    SQ_IMG_RSRC_WORD1 word1;
+    SQ_IMG_RSRC_WORD2 word2;
+    SQ_IMG_RSRC_WORD3 word3;
+    SQ_IMG_RSRC_WORD4 word4;
+    SQ_IMG_RSRC_WORD5 word5;
+    SQ_IMG_RSRC_WORD6 word6;
+    SQ_IMG_RSRC_WORD7 word7;
+
+    // Get ADDR3 surface information
+    ADDR3_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
+    std::vector<ADDR3_MIP_INFO> mip_info_storage;
+    mip_info_storage.resize(mipmap.num_levels);
+
+    // Assign pointer to allocated memory
+    out.pMipInfo = mip_info_storage.empty() ? nullptr : mip_info_storage.data();
+    unsigned int swizzleMode = GetAddrlibSurfaceInfoNv(mipmap.component,
+                            mipmap.desc, mipmap.num_levels, mipmap.tile_mode,
+                            mipmap.row_pitch, mipmap.slice_pitch, out);
+    if (swizzleMode == (uint32_t)(-1)) {
+      return HSA_STATUS_ERROR;
+    }
+    mipmap.addr_output.addr3 = out;
+    mipmap.size = out.surfSize;
+
+    assert((out.bpp / 8) == mipmap_prop.element_size);
+
+    const size_t row_pitch_size = out.pitch * mipmap_prop.element_size;
+
+    word0.val = 0;
+    word0.f.BASE_ADDRESS = PtrLow40Shift8(mipmap_data_addr);
+
+    word1.val = 0;
+    word1.f.BASE_ADDRESS_HI = PtrHigh64Shift40(mipmap_data_addr);
+    word1.f.MAX_MIP = mipmap.num_levels - 1;
+    word1.f.BASE_LEVEL = 0;
+    word1.f.FORMAT = GetCombinedFormat(mipmap_prop.data_format, mipmap_prop.data_type);
+    // Only take the lowest 2 bits of (image.desc.width - 1)
+    word1.f.WIDTH = BitSelect<0, 1>(mipmap.desc.width - 1);
+
+    word2.val = 0;
+    // Take the high 14 bits of (mipmap.desc.width - 1)
+    word2.f.WIDTH_HI = BitSelect<2, 15>(mipmap.desc.width - 1);
+    word2.f.HEIGHT = mipmap.desc.height ? mipmap.desc.height - 1 : 0;
+
+    const Swizzle swizzle = ImageLut().MapSwizzle(mipmap.desc.format.channel_order);
+    word3.val = 0;
+    word3.f.DST_SEL_X = swizzle.x;
+    word3.f.DST_SEL_Y = swizzle.y;
+    word3.f.DST_SEL_Z = swizzle.z;
+    word3.f.DST_SEL_W = swizzle.w;
+    // word3.f.NO_EDGE_CLAMP = 0;                    // New to GFX12
+    word3.f.LAST_LEVEL = mipmap.num_levels - 1;   // New to GFX12
+    word3.f.SW_MODE = swizzleMode;
+    word3.f.BC_SWIZZLE = GetBcSwizzle(swizzle);
+    word3.f.TYPE = ImageLut().MapGeometry(mipmap.desc.geometry);
+
+    const bool mipmap_array =
+        (mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ||
+         mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DA ||
+         mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DADEPTH);
+    const bool mipmap_3d = (mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_3D);
+
+    word4.val = 0;
+
+    // For 1d, 2d and 2d-msaa, fields DEPTH+PITCH_MSB encode pitch-1
+    if (!mipmap_array && !mipmap_3d) {
+      uint32_t encPitch = out.pitch - 1;
+      word4.f.DEPTH = encPitch & 0x3fff;           // first 14 bits
+      word4.f.PITCH_MSB = (encPitch >> 14) & 0x3;  // last 2 bits
+    } else {
+      word4.f.DEPTH =
+        (mipmap_array) // Doesn't hurt but isn't array_size already >0?
+            ? std::max(mipmap.desc.array_size, static_cast<size_t>(1)) - 1
+            : (mipmap_3d) ? mipmap.desc.depth - 1 : 0;
+    }
+
+    word5.val = 0;
+    word6.val = 0;
+    word7.val = 0;
+
+    mipmap.srd[0] = word0.val;
+    mipmap.srd[1] = word1.val;
+    mipmap.srd[2] = word2.val;
+    mipmap.srd[3] = word3.val;
+    mipmap.srd[4] = word4.val;
+    mipmap.srd[5] = word5.val;
+    mipmap.srd[6] = word6.val;
+    mipmap.srd[7] = word7.val;
+
+    mipmap.row_pitch = row_pitch_size;
+    mipmap.slice_pitch = out.sliceSize;
+  }
+
+  mipmap.srd[8] = mipmap.desc.format.channel_type;
+  mipmap.srd[9] = mipmap.desc.format.channel_order;
+  mipmap.srd[10] = static_cast<uint32_t>(mipmap.desc.width);
+
+  // Mipmap-specific auxiliary fields
+  mipmap.srd[11] = mipmap.num_levels;
+  mipmap.srd[12] = static_cast<uint32_t>(mipmap.desc.height); // Base height
+  mipmap.srd[13] = static_cast<uint32_t>(mipmap.desc.depth);  // Base depth
+  mipmap.srd[14] = 0;
+  mipmap.srd[15] = 0;
+
+  return HSA_STATUS_SUCCESS;
 }
 
 }  // namespace image

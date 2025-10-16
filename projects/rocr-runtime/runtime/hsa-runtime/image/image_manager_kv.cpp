@@ -221,6 +221,7 @@ void ImageManagerKv::GetImageInfoMaxDimension(hsa_agent_t component,
 hsa_status_t ImageManagerKv::CalculateImageSizeAndAlignment(
     hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
     hsa_ext_image_data_layout_t image_data_layout,
+    uint32_t num_mipmap_levels,
     size_t image_data_row_pitch,
     size_t image_data_slice_pitch,
     hsa_ext_image_data_info_t& image_info) const {
@@ -718,6 +719,159 @@ hsa_status_t ImageManagerKv::FillImage(const Image& image, const void* pattern,
   }
 
   return status;
+}
+
+hsa_status_t ImageManagerKv::PopulateMipmapSrd(MipmappedArray& mipmap) const {
+  ImageProperty mipmap_prop = ImageLut().MapFormat(mipmap.desc.format, mipmap.desc.geometry);
+  assert(mipmap_prop.cap != HSA_EXT_IMAGE_CAPABILITY_NOT_SUPPORTED);
+  assert(mipmap_prop.element_size != 0);
+  assert(mipmap.num_levels >= 1);
+
+  bool atc_access = true;
+  uint32_t mtype = mtype_;
+  const void* mipmap_data_addr = mipmap.data;
+
+  if (IsLocalMemory(mipmap.data)) {
+    atc_access = false;
+    mtype = 1;
+    mipmap_data_addr = reinterpret_cast<const void*>(
+        reinterpret_cast<uintptr_t>(mipmap.data) - local_memory_base_address_);
+  }
+
+  if (mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DB) {
+    SQ_BUF_RSRC_WORD0 word0;
+    SQ_BUF_RSRC_WORD1 word1;
+    SQ_BUF_RSRC_WORD2 word2;
+    SQ_BUF_RSRC_WORD3 word3;
+
+    word0.u32_all = 0;
+    word0.bits.base_address = PtrLow32(mipmap_data_addr);
+
+    word1.u32_all = 0;
+    word1.bits.base_address_hi = PtrHigh32(mipmap_data_addr);
+    word1.bits.stride = mipmap_prop.element_size;
+    word1.bits.swizzle_enable = false;
+    word1.bits.cache_swizzle = false;
+
+    uint32_t major_ver = MajorVerFromDevID(chip_id_);
+    word2.bits.num_records = (major_ver < 8) ?
+                mipmap.desc.width : mipmap.desc.width * mipmap_prop.element_size;
+
+    const Swizzle swizzle = ImageLut().MapSwizzle(mipmap.desc.format.channel_order);
+    word3.u32_all = 0;
+    word3.bits.dst_sel_x = swizzle.x;
+    word3.bits.dst_sel_y = swizzle.y;
+    word3.bits.dst_sel_z = swizzle.z;
+    word3.bits.dst_sel_w = swizzle.w;
+    word3.bits.num_format = mipmap_prop.data_type;
+    word3.bits.data_format = mipmap_prop.data_format;
+    word3.bits.atc = atc_access;
+    word3.bits.element_size = mipmap_prop.element_size;
+    word3.bits.type = ImageLut().MapGeometry(mipmap.desc.geometry);
+    word3.bits.mtype = mtype;
+
+    mipmap.srd[0] = word0.u32_all;
+    mipmap.srd[1] = word1.u32_all;
+    mipmap.srd[2] = word2.u32_all;
+    mipmap.srd[3] = word3.u32_all;
+
+    mipmap.row_pitch = mipmap.desc.width * mipmap_prop.element_size;
+    mipmap.slice_pitch = mipmap.row_pitch;
+  } else {
+    SQ_IMG_RSRC_WORD0 word0;
+    SQ_IMG_RSRC_WORD1 word1;
+    SQ_IMG_RSRC_WORD2 word2;
+    SQ_IMG_RSRC_WORD3 word3;
+    SQ_IMG_RSRC_WORD4 word4;
+    SQ_IMG_RSRC_WORD5 word5;
+    SQ_IMG_RSRC_WORD6 word6;
+    SQ_IMG_RSRC_WORD7 word7;
+
+    ADDR_COMPUTE_SURFACE_INFO_OUTPUT out = {0};
+    if (!GetAddrlibSurfaceInfo(mipmap.component, mipmap.desc, mipmap.tile_mode,
+          mipmap.row_pitch, mipmap.slice_pitch, out)) {
+      return HSA_STATUS_ERROR;
+    }
+    mipmap.addr_output.addr1 = out;
+    mipmap.size = out.surfSize;
+
+    assert((out.bpp / 8) == mipmap_prop.element_size);
+
+    const size_t row_pitch_size = out.pitch * mipmap_prop.element_size;
+
+    word0.bits.base_address = PtrLow40Shift8(mipmap_data_addr);
+
+    word1.u32_all = 0;
+    word1.bits.base_address_hi = PtrHigh64Shift40(mipmap_data_addr);
+    word1.bits.min_lod = 0;
+    word1.bits.data_format = mipmap_prop.data_format;
+    word1.bits.num_format = mipmap_prop.data_type;
+    word1.bits.mtype = mtype;
+
+    word2.u32_all = 0;
+    word2.bits.width = mipmap.desc.width - 1;
+    word2.bits.height = mipmap.desc.height - 1;
+    word2.bits.perf_mod = 0;
+    word2.bits.interlaced = 0;
+
+    const Swizzle swizzle = ImageLut().MapSwizzle(mipmap.desc.format.channel_order);
+    word3.u32_all = 0;
+    word3.bits.dst_sel_x = swizzle.x;
+    word3.bits.dst_sel_y = swizzle.y;
+    word3.bits.dst_sel_z = swizzle.z;
+    word3.bits.dst_sel_w = swizzle.w;
+    word3.bits.tiling_index = out.tileIndex;
+    word3.bits.pow2_pad = (IsPowerOfTwo(row_pitch_size) && IsPowerOfTwo(mipmap.desc.height)) ? 1 : 0;
+    word3.bits.type = ImageLut().MapGeometry(mipmap.desc.geometry);
+    word3.bits.atc = atc_access;
+
+    const bool mipmap_array =
+        (mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_1DA ||
+         mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DA ||
+         mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_2DADEPTH);
+    const bool mipmap_3d = (mipmap.desc.geometry == HSA_EXT_IMAGE_GEOMETRY_3D);
+
+    word4.u32_all = 0;
+    word4.bits.depth =
+        (mipmap_array)
+            ? std::max(mipmap.desc.array_size, static_cast<size_t>(1)) - 1
+            : (mipmap_3d) ? mipmap.desc.depth - 1 : 0;
+    word4.bits.pitch = out.pitch - 1;
+
+    word5.u32_all = 0;
+    word5.bits.last_array =
+        (mipmap_array)
+            ? (std::max(mipmap.desc.array_size, static_cast<size_t>(1)) - 1)
+            : 0;
+
+    word6.u32_all = 0;
+    word7.u32_all = 0;
+
+    mipmap.srd[0] = word0.u32_all;
+    mipmap.srd[1] = word1.u32_all;
+    mipmap.srd[2] = word2.u32_all;
+    mipmap.srd[3] = word3.u32_all;
+    mipmap.srd[4] = word4.u32_all;
+    mipmap.srd[5] = word5.u32_all;
+    mipmap.srd[6] = word6.u32_all;
+    mipmap.srd[7] = word7.u32_all;
+
+    mipmap.row_pitch = row_pitch_size;
+    mipmap.slice_pitch = out.sliceSize;
+  }
+
+  mipmap.srd[8] = mipmap.desc.format.channel_type;
+  mipmap.srd[9] = mipmap.desc.format.channel_order;
+  mipmap.srd[10] = static_cast<uint32_t>(mipmap.desc.width);
+
+  // Mipmap-specific auxiliary fields
+  mipmap.srd[11] = mipmap.num_levels;
+  mipmap.srd[12] = static_cast<uint32_t>(mipmap.desc.height); // Base height
+  mipmap.srd[13] = static_cast<uint32_t>(mipmap.desc.depth);  // Base depth
+  mipmap.srd[14] = 0;
+  mipmap.srd[15] = 0;
+
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t ImageManagerKv::GetLocalMemoryRegion(hsa_region_t region,

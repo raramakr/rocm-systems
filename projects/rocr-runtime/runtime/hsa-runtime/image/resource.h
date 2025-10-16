@@ -49,6 +49,7 @@
 
 #include "inc/hsa.h"
 #include "inc/hsa_ext_image.h"
+#include "addrlib/inc/addrinterface.h"
 
 #include "util.h"
 
@@ -97,7 +98,7 @@ typedef struct ImageProperty {
 
 /// @brief Structure to represent an HSA image object.
 typedef struct Image {
-private:
+protected:
   Image() {
     component.handle = 0;
     permission = HSA_ACCESS_PERMISSION_RO;
@@ -140,7 +141,7 @@ public:
     for (int i = 0; i < sizeof(srd) / sizeof(srd[0]); i++)
       hexStrLen += sprintf(&hexStr[hexStrLen], "0x%08x ", srd[i]);
 
-    printf("\nSRD:%s\n\n", hexStr);
+    printf("\nSRD: %s\n\n", hexStr);
   }
 
   // HSA component of the image object.
@@ -201,6 +202,87 @@ public:
   // HSA sampler descriptor of the image object.
   hsa_ext_sampler_descriptor_v2_t desc;
 } Sampler;
+
+/// @brief Structure representing a mipmapped image array.
+typedef struct MipmappedArray : public Image {
+private:
+  MipmappedArray() {
+    component.handle = 0;
+    data = NULL;
+    size = 0;
+    std::memset(srd, 0, sizeof(srd));
+    std::memset(&desc, 0, sizeof(desc));
+    permission = HSA_ACCESS_PERMISSION_RO;
+    num_levels = 0;
+    flags = 0;
+    addr_handle = nullptr;
+    std::memset(&addr_output, 0, sizeof(addr_output));
+    row_pitch = slice_pitch = 0;
+    tile_mode = LINEAR;
+  }
+
+~MipmappedArray() {
+  if (addr_handle) {
+    AddrDestroy(addr_handle);
+    addr_handle = nullptr;
+  }
+  // There is no pMipInfo for ADDR in pre-GFX9 versions
+  if (addr_output.addr2.pMipInfo) {
+    addr_output.addr2.pMipInfo = nullptr;
+  } else if (addr_output.addr3.pMipInfo) {
+    addr_output.addr3.pMipInfo = nullptr;
+  }
+}
+
+public:
+  /// @brief Create a MipmappedArray.
+  // expected_surf_size_bytes: total bytes of all mip levels (In AddrLib - surfSize).
+  // Only metadata is allocated
+  static MipmappedArray* Create(hsa_agent_t agent);
+
+  /// @brief Destroy a MipmappedArray.
+  static void Destroy(const MipmappedArray* array);
+
+  /// @brief Convert from vendor representation to HSA handle.
+  using Image::Convert;
+
+  /// @brief Convert from HSA handle to vendor representation.
+  static MipmappedArray* Convert(uint64_t handle) {
+    return reinterpret_cast<MipmappedArray*>(handle - offsetof(MipmappedArray, srd));
+  }
+
+  /// @brief Print all the elements of MipmappedArray
+  void PrintAll() {
+    std::cout << "size of array\t= " << size << std::endl
+              << "num_levels\t= " << num_levels << std::endl
+              << "addr_handle\t= " << addr_handle << std::endl
+              << "desc.geometry\t= " << desc.geometry << std::endl
+              << "desc.width\t= " << desc.width << std::endl
+              << "desc.height\t= " << desc.height << std::endl
+              << "desc.depth\t= " << desc.depth << std::endl
+              << "desc.array_size\t= " << desc.array_size << std::endl;
+  }
+
+  // Total size of the allocated memory.
+  size_t size;
+
+  // Number of mipmap levels.
+  uint32_t num_levels;
+
+  // Reserved
+  uint32_t flags;
+
+  // Address library handle.
+  ADDR_HANDLE addr_handle;
+
+  // Cached surface info.
+  union {
+    ADDR_COMPUTE_SURFACE_INFO_OUTPUT addr1;   // Pre-GFX9 versions
+    ADDR2_COMPUTE_SURFACE_INFO_OUTPUT addr2;  // GFX9 and later
+    ADDR3_COMPUTE_SURFACE_INFO_OUTPUT addr3;  // GFX10 and later
+  } addr_output;
+
+} MipmappedArray;
 
 }  // namespace image
 }  // namespace rocr

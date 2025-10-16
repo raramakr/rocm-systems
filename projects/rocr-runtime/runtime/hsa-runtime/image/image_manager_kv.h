@@ -79,6 +79,7 @@ class ImageManagerKv : public ImageManager {
   virtual hsa_status_t CalculateImageSizeAndAlignment(
       hsa_agent_t component, const hsa_ext_image_descriptor_t& desc,
       hsa_ext_image_data_layout_t image_data_layout,
+      uint32_t num_mipmap_levels,
       size_t image_data_row_pitch, size_t image_data_slice_pitch,
       hsa_ext_image_data_info_t& image_info) const;
 
@@ -116,6 +117,9 @@ class ImageManagerKv : public ImageManager {
   virtual hsa_status_t FillImage(const Image& image, const void* pattern,
                                  const hsa_ext_image_region_t& region);
 
+  /// @brief Fill mipmap structure with device specific mipmapped array object.
+  virtual hsa_status_t PopulateMipmapSrd(MipmappedArray& mipmap_array) const;
+
  protected:
   static hsa_status_t GetLocalMemoryRegion(hsa_region_t region, void* data);
 
@@ -144,6 +148,8 @@ class ImageManagerKv : public ImageManager {
   virtual const ImageLutKv& ImageLut() const { return image_lut_; };
 
   ADDR_HANDLE addr_lib_;
+
+  virtual ADDR_HANDLE GetAddrLib() const override { return addr_lib_; }
 
   hsa_agent_t agent_;
 
