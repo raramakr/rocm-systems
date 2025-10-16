@@ -639,6 +639,8 @@ global:
     hipLibraryGetKernel;
     hipLibraryGetKernelCount;
     hipStreamCopyAttributes;
+    hipMemSetMemPool;
+    hipMemGetMemPool;
 local:
     *;
 } hip_7.1;

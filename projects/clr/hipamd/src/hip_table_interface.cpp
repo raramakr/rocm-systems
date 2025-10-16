@@ -2041,3 +2041,11 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
   return hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count,
                                                                  library);
 }
+hipError_t hipMemSetMemPool(hipMemLocation* location, hipMemAllocationType type,
+                            hipMemPool_t pool) {
+  return hip::GetHipDispatchTable()->hipMemSetMemPool_fn(location, type, pool);
+}
+hipError_t hipMemGetMemPool(hipMemPool_t* pool, hipMemLocation* location,
+                            hipMemAllocationType type) {
+  return hip::GetHipDispatchTable()->hipMemGetMemPool_fn(pool, location, type);
+}
