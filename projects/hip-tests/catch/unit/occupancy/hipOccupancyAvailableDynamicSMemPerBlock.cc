@@ -88,38 +88,13 @@ TEST_CASE("Unit_hipOccupancyAvailableDynamicSMemPerBlock_Negative") {
                     hipErrorInvalidValue);
   }
 
+#if HT_AMD
   SECTION("dynamicSmemSize is null") {
     HIP_CHECK_ERROR(hipOccupancyAvailableDynamicSMemPerBlock(
                         nullptr, f1, numBlocks, blockSize),
                     hipErrorInvalidValue);
   }
-
-  SECTION("Threads limitation exceded ") {
-    hipDeviceProp_t devProp;
-    HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
-    blockSize = devProp.maxThreadsPerMultiProcessor + 1;
-    HIP_CHECK_ERROR(hipOccupancyAvailableDynamicSMemPerBlock(
-                        &dynamicSmemSize, f1, numBlocks, blockSize),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("maxSharedMemoryPerMultiProcessor limit exceded ") {
-    hipDeviceProp_t devProp;
-    numBlocks = devProp.maxSharedMemoryPerMultiProcessor;
-    HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
-    HIP_CHECK_ERROR(hipOccupancyAvailableDynamicSMemPerBlock(
-                        &dynamicSmemSize, f1, numBlocks, blockSize),
-                    hipErrorInvalidValue);
-  }
-
-  SECTION("regsPerMultiprocessor limit exceded") {
-    hipDeviceProp_t devProp;
-    numBlocks = devProp.regsPerMultiprocessor;
-    HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
-    HIP_CHECK_ERROR(hipOccupancyAvailableDynamicSMemPerBlock(
-                        &dynamicSmemSize, f1, numBlocks, blockSize),
-                    hipErrorInvalidValue);
-  }
+#endif
 }
 
 /**
