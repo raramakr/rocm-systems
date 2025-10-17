@@ -31,6 +31,8 @@
 #include <amdgpu.h>
 #include <amdgpu_drm.h>
 #include <sys/param.h>
+#include <thread>
+#include <functional>
 #include "hsakmt/hsakmt.h"
 #include "OSWrapper.hpp"
 #include "KFDTestUtil.hpp"
@@ -108,7 +110,11 @@ class KFDBaseComponentTest : public testing::Test {
     HSAKMT_STATUS KFDTestMultiGPU(Test_Function test_function,
 				    unsigned int gpu_num);
 
+    HSAKMT_STATUS KFDTestMultiGPUStd(std::function<void(int)> test_func, unsigned int gpu_num);
+
     HSAKMT_STATUS KFDTest_Launch(Test_Function test_function);
+
+    HSAKMT_STATUS KFDTestLaunchStd(std::function<void(int)> test_func);
 
  protected:
     HsaVersionInfo  m_VersionInfo;
