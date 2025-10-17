@@ -1315,6 +1315,12 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                             user_data, ts);
                 break;
             }
+            case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
+            {
+                tool_tracing_callback_start(category::rocm_scratch_memory{}, record,
+                                            user_data, ts);
+                break;
+            }
 #if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
@@ -1348,7 +1354,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
             case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
             case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
-            case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
             case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
 #if(ROCPROFILER_VERSION >= 600)
@@ -1399,6 +1404,12 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                            ts, _bt_data);
                 break;
             }
+            case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
+            {
+                tool_tracing_callback_stop(category::rocm_scratch_memory{}, record, user_data,
+                                           ts, _bt_data);
+                break;
+            }
 #if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
@@ -1433,7 +1444,6 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
             case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
             case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
-            case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
             case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
 #if(ROCPROFILER_VERSION >= 600)
@@ -2128,6 +2138,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
             ROCPROFILER_CALLBACK_TRACING_RCCL_API,
+            ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
 #if(ROCPROFILER_VERSION >= 600)
             ROCPROFILER_CALLBACK_TRACING_OMPT,
             ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,

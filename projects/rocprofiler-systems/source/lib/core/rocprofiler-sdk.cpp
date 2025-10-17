@@ -288,9 +288,16 @@ config_settings(const std::shared_ptr<settings>& _config)
 
         if(_op_choices.empty()) return;
 
+        std::cout << "config_settings() : _domain.value = " << _domain.value << std::endl;
+
         _operation_option_names.emplace(
             _domain.value,
             operation_options{ _op_option_name, _eop_option_name, _bt_option_name });
+
+        std::cout << "_operation_option_names is now: ";
+            for (auto [elt,_] : _operation_option_names) {
+            std::cout << elt << " ";
+        }
 
         if(_option_names.emplace(_op_option_name).second)
         {
@@ -361,14 +368,21 @@ config_settings(const std::shared_ptr<settings>& _config)
 
     _skip_domains.emplace("kernel_dispatch");
     _skip_domains.emplace("page_migration");
-    _skip_domains.emplace("scratch_memory");
+    // _skip_domains.emplace("scratch_memory");
 
     _add_operation_settings(
         "MARKER_API", callback_tracing_info[ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API],
         callback_operation_option_names);
 
     for(const auto& itr : callback_tracing_info)
+    {
+        std::cout << "\n" << itr.name << " : " << itr.value << std::endl;
         _add_operation_settings(itr.name, itr, callback_operation_option_names);
+    }
+    std::cout << "\nconfig_settings() : callback_operation_option_names: ";
+    for (auto [elt, _] : callback_operation_option_names) {
+        std::cout << elt << " ";
+    }
 
     for(const auto& itr : buffered_tracing_info)
         _add_operation_settings(itr.name, itr, buffered_operation_option_names);
@@ -403,6 +417,7 @@ get_callback_domains()
         ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
         ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
         ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+        ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY
     };
 
     auto _version = get_version();
@@ -494,6 +509,14 @@ get_callback_domains()
             }
         }
     }
+
+    // MIKE DEBUG print _data
+    std::cout << "_data: ";
+    for (auto element : _data) {
+        std::cout << element << " ";
+    }
+    std::cout << std::endl;
+    // !MIKE DEBUG
 
     return _data;
 }
@@ -604,7 +627,7 @@ get_operations(rocprofiler_callback_tracing_kind_t kindv)
 {
     ROCPROFSYS_CONDITIONAL_ABORT_F(
         callback_operation_option_names.count(kindv) == 0,
-        "callback_operation_operation_names does not have value for %i\n", kindv);
+        "callback_operation_option_names does not have value for %i\n", kindv);
 
     auto _complete = get_operations_impl(kindv);
     auto _include  = get_operations_impl(
