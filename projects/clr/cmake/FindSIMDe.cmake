@@ -35,7 +35,7 @@ else()
         find_path(SIMDE_INCLUDE_DIR
             NAMES simde/simde-common.h
             PATHS
-                "C:/simde"
+                "$ENV{DK_ROOT}/win/simde"
             ENV INCLUDE
     )
     elseif(UNIX)
