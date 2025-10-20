@@ -896,7 +896,8 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
   // \todo forces PAL to reuse CBs, but requires postamble
   createInfo.flags.autoMemoryReuse = false;
   createInfo.allocInfo[Pal::CommandDataAlloc].allocHeap = Pal::GpuHeapGartUswc;
-  createInfo.allocInfo[Pal::CommandDataAlloc].suballocSize = VirtualGPU::Queue::MaxCommands *
+  createInfo.allocInfo[Pal::CommandDataAlloc].suballocSize =
+      VirtualGPU::Queue::MaxCommands *
       (320 + ((profiling) ? 96 : 0) + ((dev().captureMgr() != nullptr) ? 512 : 0));
   createInfo.allocInfo[Pal::CommandDataAlloc].allocSize =
       dev().settings().maxCmdBuffers_ * createInfo.allocInfo[Pal::CommandDataAlloc].suballocSize;
@@ -925,8 +926,8 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
 
   uint idx = index() % dev().numComputeEngines();
   uint64_t residency_limit = dev().properties().gpuMemoryProperties.flags.supportPerSubmitMemRefs
-      ? 0
-      : (dev().properties().gpuMemoryProperties.maxLocalMemSize >> 2);
+                                 ? 0
+                                 : (dev().properties().gpuMemoryProperties.maxLocalMemSize >> 2);
   uint max_cmd_buffers = dev().settings().maxCmdBuffers_;
 
   if (dev().numComputeEngines()) {
@@ -937,8 +938,8 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
     }
     const auto& info = dev().QueuePool().find(queues_[MainEngine]->iQueue_);
     hwRing_ = (info != dev().QueuePool().end())
-        ? info->second->index_
-        : (index() % dev().numExclusiveComputeEngines()) + GPU_MAX_HW_QUEUES;
+                  ? info->second->index_
+                  : (index() % dev().numExclusiveComputeEngines()) + GPU_MAX_HW_QUEUES;
 
     // Check if device has SDMA engines
     if (dev().numDMAEngines() != 0 && !dev().settings().disableSdma_) {
@@ -1440,25 +1441,25 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
   amd::Memory* bufferFromImageDst = nullptr;
 
   // Force buffer read for IMAGE1D_BUFFER
-  if ((srcMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+  if (srcMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
     bufferFromImageSrc = createBufferFromImage(srcMem);
     if (nullptr == bufferFromImageSrc) {
       LogError("We should not fail buffer creation from image_buffer!");
     } else {
-      type = CL_COMMAND_COPY_BUFFER;
       srcMemory = dev().getGpuMemory(bufferFromImageSrc);
     }
   }
   // Force buffer write for IMAGE1D_BUFFER
-  if ((dstMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER)) {
+  if (dstMem.getType() == CL_MEM_OBJECT_IMAGE1D_BUFFER) {
     bufferFromImageDst = createBufferFromImage(dstMem);
     if (nullptr == bufferFromImageDst) {
       LogError("We should not fail buffer creation from image_buffer!");
     } else {
-      type = CL_COMMAND_COPY_BUFFER;
       dstMemory = dev().getGpuMemory(bufferFromImageDst);
     }
   }
+
+  type = getCopyCommandType(type, srcMem.getType(), dstMem.getType());
 
   bool result = false;
 
@@ -1472,41 +1473,44 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       amd::Coord3D realSize(size.c[0], size.c[1], size.c[2]);
 
       if (nullptr != bufferFromImageSrc) {
-        size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
+        const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
         realSrcOrigin.c[0] *= elemSize;
         if (nullptr != bufferFromImageDst) {
           realDstOrigin.c[0] *= elemSize;
         }
         realSize.c[0] *= elemSize;
       } else if (nullptr != bufferFromImageDst) {
-        size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
+        const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
         realDstOrigin.c[0] *= elemSize;
         realSize.c[0] *= elemSize;
       }
 
       result = blitMgr().copyBuffer(*srcMemory, *dstMemory, realSrcOrigin, realDstOrigin, realSize,
                                     entire, copyMetadata);
-
-      if (nullptr != bufferFromImageSrc) {
-        bufferFromImageSrc->release();
-      }
-      if (nullptr != bufferFromImageDst) {
-        bufferFromImageDst->release();
-      }
     } break;
     case CL_COMMAND_COPY_BUFFER_RECT:
       result = blitMgr().copyBufferRect(*srcMemory, *dstMemory, srcRect, dstRect, size, entire,
                                         copyMetadata);
       break;
     case CL_COMMAND_COPY_IMAGE_TO_BUFFER: {
+      amd::Coord3D realDstOrigin(dstOrigin);
+      if (nullptr != bufferFromImageDst) {
+        const size_t elemSize = dstMem.asImage()->getImageFormat().getElementSize();
+        realDstOrigin.c[0] *= elemSize;
+      }
       result =
-          blitMgr().copyImageToBuffer(*srcMemory, *dstMemory, srcOrigin, dstOrigin, size, entire,
+          blitMgr().copyImageToBuffer(*srcMemory, *dstMemory, srcOrigin, realDstOrigin, size, entire,
                                       dstRect.rowPitch_, dstRect.slicePitch_, copyMetadata);
       break;
     }
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE: {
+      amd::Coord3D realSrcOrigin(srcOrigin);
+      if (nullptr != bufferFromImageSrc) {
+        const size_t elemSize = srcMem.asImage()->getImageFormat().getElementSize();
+        realSrcOrigin.c[0] *= elemSize;
+      }
       result =
-          blitMgr().copyBufferToImage(*srcMemory, *dstMemory, srcOrigin, dstOrigin, size, entire,
+          blitMgr().copyBufferToImage(*srcMemory, *dstMemory, realSrcOrigin, dstOrigin, size, entire,
                                       srcRect.rowPitch_, srcRect.slicePitch_, copyMetadata);
       break;
     }
@@ -1518,7 +1522,12 @@ bool VirtualGPU::copyMemory(cl_command_type type, amd::Memory& srcMem, amd::Memo
       LogError("Unsupported command type for memory copy!");
       break;
   }
-
+  if (nullptr != bufferFromImageSrc) {
+    bufferFromImageSrc->release();
+  }
+  if (nullptr != bufferFromImageDst) {
+    bufferFromImageDst->release();
+  }
   if (!result) {
     LogError("submitCopyMemory failed!");
     return false;
@@ -2158,7 +2167,7 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& vcmd) {
     amd::Memory* dstMemory = amd::MemObjMap::FindMemObj(vcmd.dst());
     assert(dstMemory && "No svm Buffer to fill with!");
     size_t offset = reinterpret_cast<uintptr_t>(vcmd.dst()) -
-        reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
+                    reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
 
     pal::Memory* memory = dev().getGpuMemory(dstMemory);
 
@@ -2284,7 +2293,7 @@ void VirtualGPU::submitVirtualMap(amd::VirtualMapCommand& vcmd) {
     constexpr bool kParent = false;
     vaddr_sub_obj = phys_mem_obj->getContext().devices()[0]->CreateVirtualBuffer(
         phys_mem_obj->getContext(), const_cast<void*>(vcmd.ptr()), vcmd.size(),
-        phys_mem_obj->getUserData().deviceId, kParent);
+        phys_mem_obj->getUserData().deviceId, phys_mem_obj->getUserData().locationType, kParent);
 
     // Calculate the offset from the original pointer.
     vaddr_offset = (reinterpret_cast<address>(vaddr_sub_obj->getSvmPtr()) -
@@ -2828,15 +2837,13 @@ void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
 
   if (cmd.semaphoreCmd() == amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE) {
     flushDMA(MainEngine);
-    if (Pal::Result::Success !=
-        queues_[MainEngine]->iQueue_->SignalQueueSemaphore(const_cast<Pal::IQueueSemaphore*>(sem),
-                                                           cmd.fence())) {
+    if (Pal::Result::Success != queues_[MainEngine]->iQueue_->SignalQueueSemaphore(
+                                    const_cast<Pal::IQueueSemaphore*>(sem), cmd.fence())) {
       LogError("Failed to signal external semaphore");
     }
   } else {
-    if (Pal::Result::Success !=
-        queues_[MainEngine]->iQueue_->WaitQueueSemaphore(const_cast<Pal::IQueueSemaphore*>(sem),
-                                                         cmd.fence())) {
+    if (Pal::Result::Success != queues_[MainEngine]->iQueue_->WaitQueueSemaphore(
+                                    const_cast<Pal::IQueueSemaphore*>(sem), cmd.fence())) {
       LogError("Failed to wait on external semaphore");
     }
   }
@@ -3657,9 +3664,8 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
           //! Note: SVM with subbuffers has an issue with tracking.
           //! Conformance can send read only subbuffer, but update the region
           //! in the kernel.
-          if ((mem != nullptr) &&
-              ((!info.readOnly_ && (mem->getSvmPtr() == nullptr)) ||
-               ((mem->getMemFlags() & CL_MEM_READ_ONLY) == 0))) {
+          if ((mem != nullptr) && ((!info.readOnly_ && (mem->getSvmPtr() == nullptr)) ||
+                                   ((mem->getMemFlags() & CL_MEM_READ_ONLY) == 0))) {
             mem->signalWrite(&dev());
           }
           if (info.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {
@@ -3782,16 +3788,6 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
   memoryDependency().sync(*this);
 
   return true;
-}
-
-amd::Memory* VirtualGPU::createBufferFromImage(amd::Memory& amdImage) {
-  amd::Memory* mem = new (amdImage.getContext()) amd::Buffer(amdImage, 0, 0, amdImage.getSize());
-  mem->setVirtualDevice(this);
-  if ((mem != nullptr) && !mem->create()) {
-    mem->release();
-  }
-
-  return mem;
 }
 
 void VirtualGPU::writeVQueueHeader(VirtualGPU& hostQ, const Memory* kernelTable) {

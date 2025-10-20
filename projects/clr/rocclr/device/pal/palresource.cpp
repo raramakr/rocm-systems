@@ -305,7 +305,7 @@ Resource::Resource(const Device& gpuDev, size_t size)
   desc_.state_ = 0;
   desc_.type_ = Empty;
   desc_.width_ = amd::alignUp(size, Pal::Formats::BytesPerPixel(Pal::ChNumFormat::X32_Uint)) /
-      Pal::Formats::BytesPerPixel(Pal::ChNumFormat::X32_Uint);
+                 Pal::Formats::BytesPerPixel(Pal::ChNumFormat::X32_Uint);
   desc_.height_ = 1;
   desc_.depth_ = 1;
   desc_.mipLevels_ = 1;
@@ -859,9 +859,8 @@ bool Resource::CreateInterop(CreateParams* params) {
       size_t imageSize;
       size_t gpuMemSize;
 
-      if (Pal::Result::Success !=
-          dev().iDev()->GetExternalSharedImageSizes(imgOpenInfo, &imageSize, &gpuMemSize,
-                                                    &imgCreateInfo)) {
+      if (Pal::Result::Success != dev().iDev()->GetExternalSharedImageSizes(
+                                      imgOpenInfo, &imageSize, &gpuMemSize, &imgCreateInfo)) {
         return false;
       }
 
@@ -1327,8 +1326,8 @@ bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear
   createInfo.size = desc().width_ * elementSize_;
   createInfo.size = amd::alignUp(createInfo.size, MaxGpuAlignment);
   createInfo.alignment = (params && params->alignment_ != 0)
-      ? params->alignment_
-      : (desc().scratch_ ? 64 * Ki : MaxGpuAlignment);
+                             ? params->alignment_
+                             : (desc().scratch_ ? 64 * Ki : MaxGpuAlignment);
   createInfo.vaRange = Pal::VaRange::Default;
   createInfo.priority = Pal::GpuMemPriority::Normal;
 
@@ -1388,7 +1387,7 @@ void Resource::free() {
   }
 
   const bool wait = (memoryType() != ImageView) && (memoryType() != ImageBuffer) &&
-      (memoryType() != ImageExternalBuffer) && (memoryType() != View);
+                    (memoryType() != ImageExternalBuffer) && (memoryType() != View);
 
   // OCL has to wait, even if resource is placed in the cache, since reallocation can occur
   // and resource can be reused on another async queue without a wait on a busy operation
@@ -1519,8 +1518,8 @@ bool Resource::partialMemCopyTo(VirtualGPU& gpu, const amd::Coord3D& srcOrigin,
   }
 
   bool cp_dma = dev().settings().disableSdma_ ||
-      (!enableCopyRect && desc().buffer_ && dstResource.desc().buffer_ &&
-       (size[0] < dev().settings().cpDmaCopySizeMax_));
+                (!enableCopyRect && desc().buffer_ && dstResource.desc().buffer_ &&
+                 (size[0] < dev().settings().cpDmaCopySizeMax_));
   if (cp_dma) {
     // Make sure compute is done before CP DMA start
     gpu.addBarrier(RgpSqqtBarrierReason::MemDependency, BarrierType::KernelToCopy);
@@ -1563,9 +1562,9 @@ bool Resource::partialMemCopyTo(VirtualGPU& gpu, const amd::Coord3D& srcOrigin,
     }
     copyRegion.gpuMemoryOffset = gpuMemoryOffset;
     copyRegion.gpuMemoryRowPitch = gpuMemoryRowPitch;
-    copyRegion.gpuMemoryDepthPitch = (srcOrigin[2])
-        ? srcOrigin[2]
-        : copyRegion.gpuMemoryRowPitch * copyRegion.imageExtent.height;
+    copyRegion.gpuMemoryDepthPitch =
+        (srcOrigin[2]) ? srcOrigin[2]
+                       : copyRegion.gpuMemoryRowPitch * copyRegion.imageExtent.height;
     gpu.iCmd()->CmdCopyMemoryToImage(*iMem(), *dstResource.image_, imgLayout, 1, &copyRegion);
   } else if (!desc().buffer_ && dstResource.desc().buffer_) {
     Pal::MemoryImageCopyRegion copyRegion = {};
@@ -1588,9 +1587,9 @@ bool Resource::partialMemCopyTo(VirtualGPU& gpu, const amd::Coord3D& srcOrigin,
     }
     copyRegion.gpuMemoryOffset = gpuMemoryOffset;
     copyRegion.gpuMemoryRowPitch = gpuMemoryRowPitch;
-    copyRegion.gpuMemoryDepthPitch = (dstOrigin[2])
-        ? dstOrigin[2]
-        : copyRegion.gpuMemoryRowPitch * copyRegion.imageExtent.height;
+    copyRegion.gpuMemoryDepthPitch =
+        (dstOrigin[2]) ? dstOrigin[2]
+                       : copyRegion.gpuMemoryRowPitch * copyRegion.imageExtent.height;
     gpu.iCmd()->CmdCopyImageToMemory(*image_, imgLayout, *dstResource.iMem(), 1, &copyRegion);
   } else {
     if (enableCopyRect) {
@@ -2074,6 +2073,10 @@ bool MemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
   createInfo.heaps[2] = Pal::GpuHeapGartUswc;
   createInfo.flags.peerWritable = device_->P2PAccessAllowed();
   createInfo.mallPolicy = static_cast<Pal::GpuMemMallPolicy>(device_->settings().mallPolicy_);
+  if (amd::IS_HIP && PAL_HIP_IPC_FLAG) {
+    // set interprocess for IPC memory support
+    createInfo.flags.interprocess = 1;
+  }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
   if (mem_ref != nullptr) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.
@@ -2118,6 +2121,10 @@ bool FineMemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
   createInfo.flags.useReservedGpuVa = (reserved_va != nullptr);
   createInfo.pReservedGpuVaOwner = reserved_va;
   createInfo.mallPolicy = Pal::GpuMemMallPolicy::Never;
+  if (amd::IS_HIP && PAL_HIP_IPC_FLAG) {
+    //set interprocess for IPC memory support
+    createInfo.flags.interprocess = 1;
+  }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
   if ((mem_ref != nullptr) && InitAllocator(mem_ref)) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.
@@ -2138,6 +2145,10 @@ bool FineUncachedMemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved
   createInfo.pReservedGpuVaOwner = reserved_va;
   createInfo.flags.gl2Uncached = true;
   createInfo.mallPolicy = Pal::GpuMemMallPolicy::Never;
+  if (amd::IS_HIP && PAL_HIP_IPC_FLAG) {
+    //set interprocess for IPC memory support
+    createInfo.flags.interprocess = 1;
+  }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
   if ((mem_ref != nullptr) && InitAllocator(mem_ref)) {
     // Workaround: some chunk memory are not guaranteed to be resident during initial allocation.

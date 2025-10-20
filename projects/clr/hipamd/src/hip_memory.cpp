@@ -1,4 +1,4 @@
-/* Copyright (c) 2015 - 2024 Advanced Micro Devices, Inc.
+/* Copyright (c) 2015 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -67,8 +67,8 @@ hipMemoryType getMemoryType(const amd::Memory* memory) {
   }
 
   return ((CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_USE_HOST_PTR) & memory->getMemFlags())
-      ? hipMemoryTypeHost
-      : hipMemoryTypeDevice;
+             ? hipMemoryTypeHost
+             : hipMemoryTypeDevice;
 }
 
 // ================================================================================================
@@ -336,8 +336,8 @@ hipError_t ihipMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
   hip::getCurrentDevice()->SetActiveStatus();
 
   size_t max_device_size = IS_LINUX
-      ? dev_info.maxMemAllocSize_
-      : (dev_info.maxMemAllocSize_ + dev_info.maxPhysicalMemAllocSize_);
+                               ? dev_info.maxMemAllocSize_
+                               : (dev_info.maxMemAllocSize_ + dev_info.maxPhysicalMemAllocSize_);
 
   if ((useHostDevice && dev_info.maxPhysicalMemAllocSize_ < sizeBytes) ||
       (!useHostDevice && max_device_size < sizeBytes)) {
@@ -401,9 +401,8 @@ hipError_t ihipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
   }
 
   if (flags == 0 ||
-      flags &
-          (hipHostMallocCoherent | hipHostMallocMapped | hipHostMallocNumaUser |
-           hipHostMallocUncached) ||
+      flags & (hipHostMallocCoherent | hipHostMallocMapped | hipHostMallocNumaUser |
+               hipHostMallocUncached) ||
       (!(flags & hipHostMallocNonCoherent) && HIP_HOST_COHERENT)) {
     ihipFlags |= CL_MEM_SVM_ATOMICS;
   }
@@ -830,6 +829,11 @@ hipError_t hipMemcpyWithStream(void* dst, const void* src, size_t sizeBytes, hip
 hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
   HIP_INIT_API(hipMemPtrGetInfo, ptr, size);
 
+  if (ptr == nullptr) {
+    *size = 0;
+    HIP_RETURN(hipSuccess);
+  }
+
   size_t offset = 0;
   amd::Memory* svmMem = getMemoryObject(ptr, offset);
 
@@ -1143,7 +1147,7 @@ hipError_t ihipArrayCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAll
     return hipErrorInvalidValue;
   }
   unsigned int flags = hipArrayDefault | hipArrayLayered | hipArraySurfaceLoadStore |
-      hipArrayTextureGather;  // hipArrayCubemap isn't supported
+                       hipArrayTextureGather;  // hipArrayCubemap isn't supported
   if (pAllocateArray->Flags & (~flags)) {
     return hipErrorInvalidValue;
   }
@@ -1282,9 +1286,8 @@ hipError_t hipHostGetFlags(unsigned int* flagsPtr, void* hostPtr) {
 
 hipError_t ihipHostRegister(void* hostPtr, size_t sizeBytes, unsigned int flags) {
   if (hostPtr == nullptr || sizeBytes == 0 ||
-      flags &
-          ~(hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterCoarseGrained |
-            hipExtHostRegisterUncached)) {
+      flags & ~(hipHostRegisterPortable | hipHostRegisterMapped | hipExtHostRegisterCoarseGrained |
+                hipExtHostRegisterUncached)) {
     return hipErrorInvalidValue;
   } else {
     unsigned int memFlags = CL_MEM_USE_HOST_PTR | CL_MEM_SVM_ATOMICS;
@@ -1377,9 +1380,8 @@ hipError_t hipHostAlloc(void** ptr, size_t sizeBytes, unsigned int flags) {
   if (ptr == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  if (flags &
-      ~(hipHostAllocPortable | hipHostAllocMapped | hipHostAllocWriteCombined |
-        hipHostAllocUncached)) {
+  if (flags & ~(hipHostAllocPortable | hipHostAllocMapped | hipHostAllocWriteCombined |
+                hipHostAllocUncached)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -1798,12 +1800,13 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
   } else {
     amd::Command::EventWaitList waitList;
     auto* pStream = hip::getNullStream(srcMemory->GetDeviceById()->context());
-    if (stream != pStream) {
+    if (stream->DeviceId() != srcMemory->getUserData().deviceId) {
       amd::Command* cmd = pStream->getLastQueuedCommand(true);
       if (cmd != nullptr) {
         waitList.push_back(cmd);
       }
     }
+
     amd::ReadMemoryCommand* readCommand =
         new amd::ReadMemoryCommand(*stream, CL_COMMAND_READ_BUFFER_RECT, waitList, *srcMemory,
                                    srcStart, copyRegion, dstHost, srcRect, dstRect, copyMetadata);
@@ -1816,6 +1819,10 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
       return hipErrorInvalidValue;
     }
     command = readCommand;
+
+    if (!waitList.empty()) {
+      waitList[0]->release();
+    }
   }
 
   return hipSuccess;
@@ -1868,9 +1875,9 @@ hipError_t ihipMemcpyHtoH(void* dstHost, const void* srcHost, amd::Coord3D copyR
   for (size_t slice = 0; slice < copyRegion[2]; slice++) {
     for (size_t row = 0; row < copyRegion[1]; row++) {
       const void* srcRow = static_cast<const char*>(srcHost) + srcRect.start_ +
-          row * srcRect.rowPitch_ + slice * srcRect.slicePitch_;
+                           row * srcRect.rowPitch_ + slice * srcRect.slicePitch_;
       void* dstRow = static_cast<char*>(dstHost) + dstRect.start_ + row * dstRect.rowPitch_ +
-          slice * dstRect.slicePitch_;
+                     slice * dstRect.slicePitch_;
       std::memcpy(dstRow, srcRow, copyRegion[0]);
     }
   }
@@ -1952,6 +1959,10 @@ hipError_t ihipMemcpyHtoACommand(amd::Command*& command, amd::Image* dstImage,
       return hipErrorInvalidValue;
     }
     command = writeMemCmd;
+
+    if (!waitList.empty()) {
+      waitList[0]->release();
+    }
   }
 
   return hipSuccess;
@@ -2000,6 +2011,10 @@ hipError_t ihipMemcpyAtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
       return hipErrorInvalidValue;
     }
     command = readMemCmd;
+
+    if (!waitList.empty()) {
+      waitList[0]->release();
+    }
   }
 
   return hipSuccess;
@@ -2331,9 +2346,8 @@ hipError_t ihipMemcpyParam3D(const HIP_MEMCPY3D* pCopy, hipStream_t stream, bool
     // Transfers from device memory to pageable host memory and transfers from any
     // host memory to any host memory are synchronous with respect to the host.
     // Device to Device copies do not need to host side synchronization.
-    if (dstMemoryType == hipMemoryTypeHost ||
-        ((pCopy->srcMemoryType == hipMemoryTypeHost) &&
-         (pCopy->dstMemoryType == hipMemoryTypeHost))) {
+    if (dstMemoryType == hipMemoryTypeHost || ((pCopy->srcMemoryType == hipMemoryTypeHost) &&
+                                               (pCopy->dstMemoryType == hipMemoryTypeHost))) {
       isAsync = false;
     } else if ((pCopy->srcMemoryType == hipMemoryTypeDevice) &&
                (pCopy->dstMemoryType == hipMemoryTypeDevice)) {
@@ -3309,6 +3323,7 @@ hipError_t hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* dev_ptr) {
 
   device = hip::getCurrentDevice()->devices()[0];
   ihandle = reinterpret_cast<amd::MemObjMap::IpcMemHandle*>(handle);
+  ihandle->owners_device_id = hip::getCurrentDevice()->deviceId();
 
   if (!device->IpcCreate(dev_ptr, &(ihandle->psize), ihandle->ipc_handle, &(ihandle->poffset))) {
     LogPrintfError("IPC memory creation failed for memory: 0x%x", dev_ptr);
@@ -3341,6 +3356,13 @@ hipError_t hipIpcOpenMemHandle(void** dev_ptr, hipIpcMemHandle_t handle, unsigne
   if (ihandle->owners_process_id == amd::Os::getProcessId()) {
     HIP_RETURN(hipErrorInvalidContext);
   }
+
+  if (ihandle->owners_device_id >= g_devices.size()) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  amd::Device* peer_device = g_devices[ihandle->owners_device_id]->asContext()->devices()[0];
+  device->enableP2P(peer_device);
 
   amd_mem_obj = amd::MemObjMap::FindIpcHandleMemObj(*ihandle);
   if (amd_mem_obj == nullptr) {
@@ -4111,7 +4133,7 @@ hipError_t ihipMipmapArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
     return hipErrorInvalidValue;
   }
   unsigned int flags = hipArrayDefault | hipArrayLayered | hipArraySurfaceLoadStore |
-      hipArrayTextureGather;  // hipArrayCubemap isn't supported
+                       hipArrayTextureGather;  // hipArrayCubemap isn't supported
   if (mipmapped_array_desc_ptr->Flags & (~flags)) {
     return hipErrorInvalidValue;
   }

@@ -24,6 +24,7 @@
 
 #include "common/synchronized.hpp"
 #include "core/agent.hpp"
+#include "core/categories.hpp"
 
 #include <cassert>
 #include <cstdint>
@@ -34,7 +35,10 @@
 #    include <rocprofiler-sdk/callback_tracing.h>
 #    include <rocprofiler-sdk/cxx/name_info.hpp>
 #endif
+#include <initializer_list>
+#include <map>
 #include <set>
+#include <sstream>
 #include <stdint.h>
 #include <string.h>
 #include <string>
@@ -53,6 +57,19 @@ struct process
     pid_t       ppid;
     std::string command;
 };
+
+template <typename Category>
+inline std::string
+annotate_category(std::optional<int> first_section  = std::nullopt,
+                  std::optional<int> second_section = std::nullopt)
+{
+    std::stringstream ss;
+    ss << std::string(tim::trait::name<Category>::value);
+    if(first_section) ss << "_" << std::to_string(*first_section);
+    if(second_section) ss << "_" << std::to_string(*second_section);
+    return ss.str();
+}
+
 struct pmc
 {
     agent_type  type;
@@ -107,6 +124,20 @@ struct thread
         return lhs.thread_id < rhs.thread_id;
     }
 };
+
+template <typename Category>
+inline std::string
+annotate_with_device_id(uint32_t           device_id,
+                        std::optional<int> first_section  = std::nullopt,
+                        std::optional<int> second_section = std::nullopt)
+{
+    std::stringstream ss;
+    ss << std::string(tim::trait::name<Category>::value) + " [" +
+              std::to_string(device_id) + "]";
+    if(first_section) ss << "_" << std::to_string(*first_section);
+    if(second_section) ss << "_" << std::to_string(*second_section);
+    return ss.str();
+}
 
 struct track
 {
@@ -186,7 +217,7 @@ struct metadata_registry
 
 private:
     friend class cache_manager;
-    metadata_registry() = default;
+    metadata_registry();
     common::synchronized<info::process> m_process;
     common::synchronized<
         std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>
@@ -211,6 +242,14 @@ private:
     rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
+
+    using callback_rename_map_t =
+        std::map<rocprofiler_tracing_operation_t, std::string_view>;
+
+    void overwrite_callback_names(
+        std::initializer_list<
+            std::pair<rocprofiler_callback_tracing_kind_t, callback_rename_map_t>>
+            rename_table);
 #endif
 };
 

@@ -110,6 +110,31 @@ typedef struct rocprofiler_stream_id_t
 
 #endif
 
+#if(ROCPROFILER_VERSION >= 600)
+
+struct rocprofsys_ompt_data_storage_t
+{
+    rocprofiler_callback_tracing_record_t record;
+    rocprofiler_timestamp_t               _beg_ts;
+    function_args_t                       args;  // Required for orphan ENTER events
+};
+
+auto
+ompt_get_unified_name(const rocprofiler_callback_tracing_record_t& record)
+{
+    std::string_view _name =
+        tool_data->callback_tracing_info.at(record.kind, record.operation);
+
+    // Forces omp_parallel begin and end to have same name, allowing track to connect
+    if(record.operation == ROCPROFILER_OMPT_ID_parallel_begin ||
+       record.operation == ROCPROFILER_OMPT_ID_parallel_end)
+        _name = "omp_parallel";
+
+    return _name;
+}
+
+#endif
+
 auto&
 get_stream_stack()
 {
@@ -541,9 +566,8 @@ cache_region(const rocprofiler_callback_tracing_record_t* record,
 }
 
 void
-cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* record)
+cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* record, uint64_t stream_handle)
 {
-    auto stream_handle = get_stream_id(record).handle;
     auto queue_handle  = record->dispatch_info.queue_id.handle;
 
     trace_cache::get_metadata_registry().add_queue(queue_handle);
@@ -569,13 +593,13 @@ cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* recor
         record->dispatch_info.grid_size.y,
         record->dispatch_info.grid_size.z,
         stream_handle);
+
 }
 
 void
-cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record)
+cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record, uint64_t stream_handle)
 {
-    auto stream_handle = get_stream_id(record).handle;
-
+    trace_cache::get_metadata_registry().add_stream(stream_handle);
     trace_cache::get_buffer_storage().store(
         trace_cache::entry_type::memory_copy,
         record->start_timestamp,
@@ -595,10 +619,8 @@ cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record)
 
 #if (ROCPROFILER_VERSION >= 600)
 void
-cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* record)
+cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* record, uint64_t stream_handle)
 {
-    auto stream_handle = get_stream_id(record).handle;
-
     trace_cache::get_metadata_registry().add_stream(stream_handle);
     trace_cache::get_buffer_storage().store(
         trace_cache::entry_type::memory_alloc,
@@ -616,6 +638,21 @@ cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* r
 }
 #endif
 // clang-format on
+
+std::string
+get_args_string(const function_args_t& args)
+{
+    std::string args_str;
+    std::for_each(args.begin(), args.end(), [&args_str](const argument_info& arg) {
+        const auto*       delimiter = ";;";
+        std::stringstream ss;
+        ss << arg.arg_number << delimiter << arg.arg_type << delimiter << arg.arg_name
+           << delimiter << arg.arg_value << delimiter;
+        args_str.append(ss.str());
+    });
+    return args_str;
+}
+
 template <typename CategoryT>
 void
 tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t record,
@@ -826,16 +863,7 @@ tool_tracing_callback_stop(
     {
         cache_category<CategoryT>();
         cache_add_thread_info(record.thread_id);
-        std::string args_str;
-
-        std::for_each(args.begin(), args.end(), [&args_str](const argument_info& arg) {
-            const auto*       delimiter = ";;";
-            std::stringstream ss;
-            ss << arg.arg_number << delimiter << arg.arg_type << delimiter << arg.arg_name
-               << delimiter << arg.arg_value << delimiter;
-            args_str.append(ss.str());
-        });
-
+        std::string args_str = get_args_string(args);
         cache_region(&record, _beg_ts, _end_ts, call_stack->to_string(), args_str,
                      trait::name<CategoryT>::value);
     }
@@ -906,14 +934,343 @@ get_kernel_dispatch_timestamps()
     return _v;
 }
 
+#if(ROCPROFILER_VERSION >= 600)
+
+// An instant event is one that has its beg_ts = end_ts
+void
+ompt_cache_instant_event(
+    rocprofiler_callback_tracing_record_t record, rocprofiler_timestamp_t _instant_ts,
+    std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
+{
+    auto args = function_args_t{};
+    rocprofiler_iterate_callback_tracing_kind_operation_args(
+        record, iterate_args_callback, 2, &args);
+    auto call_stack = get_backtrace(_bt_data);
+
+    cache_category<category::rocm_ompt_api>();
+    cache_add_thread_info(record.thread_id);
+    cache_region(&record, _instant_ts, _instant_ts, call_stack->to_string(),
+                 get_args_string(args), trait::name<category::rocm_ompt_api>::value);
+}
+
+// OMPT callbacks with no corresponding begin/end are treated as "instant"
+void
+ompt_cache_orphan_event(
+    const rocprofsys_ompt_data_storage_t&                     stored_data,
+    std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
+{
+    auto call_stack = get_backtrace(_bt_data);
+    cache_category<category::rocm_ompt_api>();
+    cache_add_thread_info(stored_data.record.thread_id);
+    cache_region(&stored_data.record, stored_data._beg_ts, stored_data._beg_ts,
+                 call_stack->to_string(), get_args_string(stored_data.args),
+                 trait::name<category::rocm_ompt_api>::value);
+}
+
+// Any OMPT callback that can be of phase ENTER or EXIT is a standard callback.
+//  I.e. it has an ompt_scope_endpoint_t in its definition (excluding
+//  ROCPROFILER_OMPT_ID_nest_lock as it is a mutex)
+auto&
+get_ompt_standard_cb_storage()
+{
+    // uint64_t -> internal id from rocprofiler_correlation_id_t
+    static thread_local auto _v =
+        std::unordered_map<uint64_t, rocprofsys_ompt_data_storage_t>{};
+    return _v;
+}
+
+// An OMPT parallel callback consists of ROCPROFILER_OMPT_ID_parallel_begin and
+// ROCPROFILER_OMPT_ID_parallel_end
+//  As the beginning and end can only occur on the same thread, they are connected into a
+//  single track called "omp_parallel" for clarity. In this track, the information
+//  contained within parallel_begin should be displayed as it contains all the information
+//  that parallel_end has as well as the flags and number of threads/teams that were
+//  requested.
+auto&
+get_ompt_parallel_cb_storage()
+{
+    // uintptr_t -> parallel_data (see callback definition)
+    static thread_local auto _v =
+        std::unordered_map<uintptr_t, rocprofsys_ompt_data_storage_t>{};
+    return _v;
+}
+
+void
+ompt_push_standard_callback(const rocprofiler_callback_tracing_record_t& record,
+                            const rocprofiler_timestamp_t&               _beg_ts)
+{
+    auto args = function_args_t{};
+    rocprofiler_iterate_callback_tracing_kind_operation_args(
+        record, iterate_args_callback, 1, &args);
+    get_ompt_standard_cb_storage().emplace(
+        record.correlation_id.internal,
+        rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
+}
+
+void
+ompt_pop_standard_callback(
+    const rocprofiler_callback_tracing_record_t&              record,
+    const rocprofiler_timestamp_t&                            _end_ts,
+    std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
+{
+    auto it = get_ompt_standard_cb_storage().find(record.correlation_id.internal);
+
+    if(it == get_ompt_standard_cb_storage().end())
+    {
+        auto args = function_args_t{};
+        rocprofiler_iterate_callback_tracing_kind_operation_args(
+            record, iterate_args_callback, 2, &args);
+        ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ record, _end_ts, args },
+                                _bt_data);
+        return;
+    }
+
+    auto stored_data = it->second;
+    get_ompt_standard_cb_storage().erase(it);
+
+    auto call_stack = get_backtrace(_bt_data);
+    cache_category<category::rocm_ompt_api>();
+    cache_add_thread_info(record.thread_id);
+    cache_region(&record, stored_data._beg_ts, _end_ts, call_stack->to_string(),
+                 get_args_string(stored_data.args),
+                 trait::name<category::rocm_ompt_api>::value);
+}
+
+void
+ompt_push_parallel_callback(const rocprofiler_callback_tracing_record_t& record,
+                            const rocprofiler_timestamp_t&               _beg_ts)
+{
+    auto* payload_data =
+        static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload);
+    const void* parallel_data_address = payload_data->args.parallel_begin.parallel_data;
+
+    auto args = function_args_t{};
+    rocprofiler_iterate_callback_tracing_kind_operation_args(
+        record, iterate_args_callback, 1, &args);
+    get_ompt_parallel_cb_storage().emplace(
+        reinterpret_cast<uintptr_t>(parallel_data_address),
+        rocprofsys_ompt_data_storage_t{ record, _beg_ts, args });
+}
+
+void
+ompt_pop_parallel_callback(
+    const rocprofiler_callback_tracing_record_t&              record,
+    const rocprofiler_timestamp_t&                            _end_ts,
+    std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
+{
+    auto* payload_data =
+        static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload);
+    const void* parallel_data_address = payload_data->args.parallel_end.parallel_data;
+
+    auto it = get_ompt_parallel_cb_storage().find(
+        reinterpret_cast<uintptr_t>(parallel_data_address));
+
+    if(it == get_ompt_parallel_cb_storage().end())
+    {
+        auto args = function_args_t{};
+        rocprofiler_iterate_callback_tracing_kind_operation_args(
+            record, iterate_args_callback, 2, &args);
+        ompt_cache_orphan_event(rocprofsys_ompt_data_storage_t{ record, _end_ts, args },
+                                _bt_data);
+        return;
+    }
+
+    auto stored_data = it->second;
+    get_ompt_parallel_cb_storage().erase(it);
+    auto call_stack = get_backtrace(_bt_data);
+
+    cache_category<category::rocm_ompt_api>();
+    cache_add_thread_info(record.thread_id);
+    cache_region(&record, stored_data._beg_ts, _end_ts, call_stack->to_string(),
+                 get_args_string(stored_data.args),
+                 trait::name<category::rocm_ompt_api>::value);
+}
+
+void
+ompt_finalize_orphan_events()
+{
+    auto empty_call_stack =
+        std::optional<std::vector<tim::unwind::processed_entry>>{ std::nullopt };
+    for(const auto& [parallel_data, stored_data] : get_ompt_parallel_cb_storage())
+    {
+        ompt_cache_orphan_event(stored_data, empty_call_stack);
+    }
+
+    for(const auto& [correlation_id, stored_data] : get_ompt_standard_cb_storage())
+    {
+        ompt_cache_orphan_event(stored_data, empty_call_stack);
+    }
+
+    get_ompt_parallel_cb_storage().clear();
+    get_ompt_standard_cb_storage().clear();
+}
+
+// To handle events without finalization, perfetto push must occur in start
+// Allows capture of worker thread implicit tasks and sync regions
+void
+ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
+                            rocprofiler_user_data_t* /*user_data*/,
+                            rocprofiler_timestamp_t ts)
+{
+    std::string_view _name = ompt_get_unified_name(record);
+
+    if(get_use_timemory())
+    {
+        component::category_region<category::rocm_marker_api>::start<quirk::timemory>(
+            _name);
+    }
+
+    if(get_use_perfetto())
+    {
+        auto args = callback_arg_array_t{};
+        if(config::get_perfetto_annotations())
+        {
+            rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, 1,
+                                                                     &args);
+        }
+
+        uint64_t _beg_ts   = ts;
+        auto     stream_id = stream_id_top();
+
+        tracing::push_perfetto_ts(
+            category::rocm_ompt_api{}, _name.data(), _beg_ts,
+            ::perfetto::Flow::ProcessScoped(record.correlation_id.internal),
+            [&](::perfetto::EventContext ctx) {
+                if(config::get_perfetto_annotations())
+                {
+                    tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ts);
+                    tracing::add_perfetto_annotation(ctx, "corr_id",
+                                                     record.correlation_id.internal);
+                    if(stream_id.handle != 0)
+                        tracing::add_perfetto_annotation(ctx, "stream_id",
+                                                         stream_id.handle);
+                    for(const auto& [key, val] : args)
+                    {
+                        tracing::add_perfetto_annotation(ctx, key, val);
+                    }
+                }
+            });
+    }
+}
+
+void
+ompt_tracing_callback_stop(
+    rocprofiler_callback_tracing_record_t record, rocprofiler_user_data_t* /*user_data*/,
+    rocprofiler_timestamp_t               ts,
+    std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
+{
+    std::string_view _name = ompt_get_unified_name(record);
+
+    if(get_use_timemory())
+    {
+        component::category_region<category::rocm_marker_api>::stop<quirk::timemory>(
+            _name);
+    }
+
+    if(get_use_perfetto())
+    {
+        auto args = callback_arg_array_t{};
+        if(config::get_perfetto_annotations())
+        {
+            rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, 2,
+                                                                     &args);
+        }
+
+        uint64_t _end_ts = ts;
+        tracing::pop_perfetto_ts(
+            category::rocm_ompt_api{}, _name.data(), _end_ts,
+            [&](::perfetto::EventContext ctx) {
+                if(config::get_perfetto_annotations())
+                    tracing::add_perfetto_annotation(ctx, "end_ns", _end_ts);
+                if(_bt_data && !_bt_data->empty())
+                {
+                    const std::string _unk    = "??";
+                    size_t            _bt_cnt = 0;
+                    for(const auto& itr : *_bt_data)
+                    {
+                        auto        _linfo = itr.lineinfo.get();
+                        const auto* _func  = (itr.name.empty()) ? &_unk : &itr.name;
+                        const auto* _loc =
+                            (_linfo && !_linfo.location.empty())
+                                ? &_linfo.location
+                                : ((itr.location.empty()) ? &_unk : &itr.location);
+                        auto _line  = (_linfo && _linfo.line > 0)
+                                          ? join("", _linfo.line)
+                                          : ((itr.lineno == 0) ? std::string{ "?" }
+                                                               : join("", itr.lineno));
+                        auto _entry = join("", demangle(*_func), " @ ",
+                                           join(':', ::basename(_loc->c_str()), _line));
+                        if(_bt_cnt < 10)
+                        {
+                            // Prepend zero for better ordering in UI. Only one zero
+                            // is ever necessary since stack depth is limited to 16.
+                            tracing::add_perfetto_annotation(
+                                ctx, join("", "frame#0", _bt_cnt++), _entry);
+                        }
+                        else
+                        {
+                            tracing::add_perfetto_annotation(
+                                ctx, join("", "frame#", _bt_cnt++), _entry);
+                        }
+                    }
+                }
+            });
+    }
+}
+
+#endif
+
 void
 tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                       rocprofiler_user_data_t* user_data, void* /*callback_data*/)
 {
+    using backtrace_entry_vec_t  = std::vector<tim::unwind::processed_entry>;
+    auto _bt_data                = std::optional<backtrace_entry_vec_t>{};
+    auto populate_backtrace_data = [&]() {
+        constexpr size_t backtrace_stack_depth       = 16;
+        constexpr size_t backtrace_ignore_depth      = 3;
+        constexpr bool   backtrace_with_signal_frame = true;
+        auto             use_perfetto =
+            (config::get_use_perfetto() && config::get_perfetto_annotations());
+        auto use_rocpd = config::get_use_rocpd();
+
+        if((use_perfetto || use_rocpd) &&
+           tool_data->backtrace_operations.at(record.kind).count(record.operation) > 0)
+        {
+            auto _backtrace =
+                tim::get_unw_stack<backtrace_stack_depth, backtrace_ignore_depth,
+                                   backtrace_with_signal_frame>();
+            _bt_data = backtrace_entry_vec_t{};
+            _bt_data->reserve(_backtrace.size());
+            for(auto itr : _backtrace)
+            {
+                if(itr)
+                {
+                    if(auto _val = binary::lookup_ipaddr_entry<false>(itr->address());
+                       _val)
+                    {
+                        _bt_data->emplace_back(std::move(*_val));
+                    }
+                }
+            }
+        }
+    };
+
+#if(ROCPROFILER_VERSION >= 600)
+    static bool is_first_implicit_task = false;
+    if(!is_first_implicit_task && record.operation == ROCPROFILER_OMPT_ID_implicit_task)
+    {
+        // We do not capture implicit task with flags = 1 on main thread
+        //  For now, this is identified as the first implicit task call
+        is_first_implicit_task = true;
+        return;
+    }
+#endif
+
     auto ts = rocprofiler_timestamp_t{};
     ROCPROFILER_CALL(rocprofiler_get_timestamp(&ts));
+    const char* name = "";
 
-    const char* name = nullptr;
     rocprofiler_query_callback_tracing_kind_operation_name(record.kind, record.operation,
                                                            &name, nullptr);
 
@@ -923,6 +1280,13 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
          << ", operation=" << std::setw(3) << record.operation
          << ", phase=" << record.phase << ", dt_nsec=" << std::setw(8) << ts
          << ", name=" << name;
+
+    if(rocprofsys::get_state() != rocprofsys::State::Active)
+    {
+        ROCPROFSYS_WARNING_F(0, "Callback called when tool is not active.\n\t%s\n",
+                             info.str().c_str());
+        return;
+    }
 
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
@@ -952,6 +1316,12 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 break;
             }
 #if(ROCPROFILER_VERSION >= 600)
+            case ROCPROFILER_CALLBACK_TRACING_OMPT:
+            {
+                ompt_tracing_callback_start(record, user_data, ts);
+                ompt_push_standard_callback(record, ts);
+                break;
+            }
             case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
             {
                 tool_tracing_callback_start(category::rocm_rocdecode_api{}, record,
@@ -982,7 +1352,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
 #if(ROCPROFILER_VERSION >= 600)
-            case ROCPROFILER_CALLBACK_TRACING_OMPT:
+            case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
             case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
 #if(ROCPROFILER_VERSION >= 700)
@@ -1003,36 +1373,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
     else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
     {
-        using backtrace_entry_vec_t = std::vector<tim::unwind::processed_entry>;
-
-        constexpr size_t bt_stack_depth       = 16;
-        constexpr size_t bt_ignore_depth      = 3;
-        constexpr bool   bt_with_signal_frame = true;
-
-        auto _bt_data = std::optional<backtrace_entry_vec_t>{};
-        auto use_perfetto =
-            (config::get_use_perfetto() && config::get_perfetto_annotations());
-        auto use_rocpd = config::get_use_rocpd();
-
-        if((use_perfetto || use_rocpd) &&
-           tool_data->backtrace_operations.at(record.kind).count(record.operation) > 0)
-        {
-            auto _backtrace = tim::get_unw_stack<bt_stack_depth, bt_ignore_depth,
-                                                 bt_with_signal_frame>();
-            _bt_data        = backtrace_entry_vec_t{};
-            _bt_data->reserve(_backtrace.size());
-            for(auto itr : _backtrace)
-            {
-                if(itr)
-                {
-                    if(auto _val = binary::lookup_ipaddr_entry<false>(itr->address());
-                       _val)
-                    {
-                        _bt_data->emplace_back(std::move(*_val));
-                    }
-                }
-            }
-        }
+        populate_backtrace_data();
 
         switch(record.kind)
         {
@@ -1059,6 +1400,12 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 break;
             }
 #if(ROCPROFILER_VERSION >= 600)
+            case ROCPROFILER_CALLBACK_TRACING_OMPT:
+            {
+                ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
+                ompt_pop_standard_callback(record, ts, _bt_data);
+                break;
+            }
             case ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API:
             {
                 tool_tracing_callback_stop(category::rocm_rocdecode_api{}, record,
@@ -1090,7 +1437,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
             case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
 #if(ROCPROFILER_VERSION >= 600)
-            case ROCPROFILER_CALLBACK_TRACING_OMPT:
+            case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
             case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
 #endif
 #if(ROCPROFILER_VERSION >= 700)
@@ -1128,6 +1475,77 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 }
             }
             break;
+#if(ROCPROFILER_VERSION >= 600)
+            case ROCPROFILER_CALLBACK_TRACING_OMPT:
+            {
+                // Callbacks that are received but that we do not process
+                static const std::set<rocprofiler_ompt_operation_t> ompt_no_process = {
+                    ROCPROFILER_OMPT_ID_callback_functions,  // "Fake" callback
+                    // There is no point in handling ompt_thread_begin events as the
+                    // corresponding ompt_thread_end event will not occur unless
+                    // runtime is finalized earlier
+                    ROCPROFILER_OMPT_ID_thread_begin,
+                    ROCPROFILER_OMPT_ID_thread_end,
+                };
+
+                auto ompt_operation_type =
+                    static_cast<rocprofiler_ompt_operation_t>(record.operation);
+                if(ompt_no_process.find(ompt_operation_type) != ompt_no_process.end())
+                    return;
+
+                populate_backtrace_data();
+
+                switch(ompt_operation_type)
+                {
+                    case ROCPROFILER_OMPT_ID_parallel_begin:
+                        ompt_tracing_callback_start(record, user_data, ts);
+                        ompt_push_parallel_callback(record, ts);
+                        break;
+                    case ROCPROFILER_OMPT_ID_parallel_end:
+                        ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
+                        ompt_pop_parallel_callback(record, ts, _bt_data);
+                        break;
+                    case ROCPROFILER_OMPT_ID_lock_init:
+                    case ROCPROFILER_OMPT_ID_lock_destroy:
+                    // Although this has endpoint arg, treat it as instant event
+                    case ROCPROFILER_OMPT_ID_nest_lock:
+                    case ROCPROFILER_OMPT_ID_dispatch:
+                    case ROCPROFILER_OMPT_ID_flush:
+                    case ROCPROFILER_OMPT_ID_cancel:
+                    case ROCPROFILER_OMPT_ID_device_initialize:
+                    case ROCPROFILER_OMPT_ID_device_finalize:
+                    case ROCPROFILER_OMPT_ID_device_load:
+                    // case ROCPROFILER_OMPT_ID_device_unload: // Unsupported by runtime
+                    case ROCPROFILER_OMPT_ID_task_create:
+                    case ROCPROFILER_OMPT_ID_task_schedule:
+                    case ROCPROFILER_OMPT_ID_mutex_released:
+                    case ROCPROFILER_OMPT_ID_mutex_acquire:
+                    case ROCPROFILER_OMPT_ID_mutex_acquired:
+                    case ROCPROFILER_OMPT_ID_dependences:
+                    case ROCPROFILER_OMPT_ID_task_dependence:
+                    case ROCPROFILER_OMPT_ID_error:
+                    {
+                        // These callbacks are considered instant events and should start
+                        // and immediately call stop as no corresponding "end" will be
+                        // received
+                        auto start_ts = ts;
+                        ompt_tracing_callback_start(record, user_data, start_ts);
+                        ROCPROFILER_CALL(
+                            rocprofiler_get_timestamp(&ts));  // Set artificial end ts
+                        ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
+                        ompt_cache_instant_event(record, start_ts, _bt_data);
+                        break;
+                    }
+                    default:
+                        ROCPROFSYS_WARNING_F(
+                            1,
+                            "tool_tracing_callback: unhandled PHASE_NONE "
+                            "callback record\n\t%s\n",
+                            info.str().c_str());
+                }
+            }
+            break;
+#endif
             default:
             {
                 ROCPROFSYS_WARNING_F(1,
@@ -1141,6 +1559,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     else
     {
         ROCPROFSYS_CI_ABORT(true, "unhandled callback record phase: %i\n", record.phase);
+        ROCPROFSYS_WARNING_F(1,
+                             "tool_tracing_callback: unhandled callback record\n\t%s\n",
+                             info.str().c_str());
     }
 }
 
@@ -1200,7 +1621,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                                          "] Queue ", _queue_id.handle)
                                         .c_str(),
                                     record->thread_id);
-                    cache_kernel_dispatch(record);
+                    cache_kernel_dispatch(record, _stream_id);
                 }
 
                 if(get_use_timemory())
@@ -1327,7 +1748,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     cache_category<category::rocm_memory_copy>();
                     cache_add_track(track_name.c_str(), record->thread_id);
 
-                    cache_memory_copy(record);
+                    cache_memory_copy(record, _stream_id);
                 }
 
                 if(get_use_timemory())
@@ -1405,10 +1826,11 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
                         header->payload);
 
+                uint64_t _stream_id = get_stream_id(record).handle;
                 {
                     cache_category<category::rocm_memory_allocate>();
                     cache_add_thread_info(record->thread_id);
-                    cache_memory_allocation(record);
+                    cache_memory_allocation(record, _stream_id);
                 }
             }
 #endif
@@ -1616,14 +2038,11 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
     // STREAM_HANDLE_CREATE and DESTROY are no-ops
     if(record.operation == ROCPROFILER_HIP_STREAM_CREATE)
     {
-        ROCPROFSYS_VERBOSE_F(
-            2, "Entered hip_streams_callback function for ROCPROFILER_HIP_STREAM_CREATE");
+        ROCPROFSYS_VERBOSE_F(3, " operation = ROCPROFILER_HIP_STREAM_CREATE\n");
     }
     else if(record.operation == ROCPROFILER_HIP_STREAM_DESTROY)
     {
-        ROCPROFSYS_VERBOSE_F(
-            2,
-            "Entered hip_streams_callback function for ROCPROFILER_HIP_STREAM_DESTROY");
+        ROCPROFSYS_VERBOSE_F(3, " operation = ROCPROFILER_HIP_STREAM_DESTROY\n");
     }
     else if(record.operation == ROCPROFILER_HIP_STREAM_SET)
     {
@@ -1631,17 +2050,19 @@ tool_hip_stream_callback(rocprofiler_callback_tracing_record_t record,
         // called
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
         {
-            ROCPROFSYS_VERBOSE_F(
-                2, "Entered hip_streams_callback function for ROCPROFILER_HIP_STREAM_SET "
-                   "with ROCPROFILER_CALLBACK_PHASE_ENTER");
+            ROCPROFSYS_VERBOSE_F(3,
+                                 " operation = ROCPROFILER_HIP_STREAM_SET, phase = "
+                                 "ROCPROFILER_CALLBACK_PHASE_ENTER, stream_id=%lu\n",
+                                 (unsigned long) stream_id.handle);
             stream_id_push(stream_id);
         }
         // Pop stream ID off of stream stack after underlying HIP function is completed
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
-            ROCPROFSYS_VERBOSE_F(
-                2, "Entered hip_stream_callback function for ROCPROFILER_HIP_STREAM_SET "
-                   "with ROCPROFILER_CALLBACK_PHASE_EXIT");
+            ROCPROFSYS_VERBOSE_F(3,
+                                 "operation = ROCPROFILER_HIP_STREAM_SET, phase = "
+                                 "ROCPROFILER_CALLBACK_PHASE_EXIT, stream_id=%lu\n",
+                                 (unsigned long) stream_id.handle);
             stream_id_pop();
         }
     }
@@ -1708,6 +2129,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
             ROCPROFILER_CALLBACK_TRACING_RCCL_API,
 #if(ROCPROFILER_VERSION >= 600)
+            ROCPROFILER_CALLBACK_TRACING_OMPT,
             ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
 #endif
 #if(ROCPROFILER_VERSION >= 700)
@@ -1872,6 +2294,10 @@ tool_fini(void* callback_data)
 {
     static std::atomic_flag _once = ATOMIC_FLAG_INIT;
     if(_once.test_and_set()) return;
+
+#if(ROCPROFILER_VERSION >= 600)
+    ompt_finalize_orphan_events();
+#endif
 
     flush();
     stop();

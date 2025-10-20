@@ -165,7 +165,7 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
     case HIP_FUNC_ATTRIBUTE_PTX_VERSION:
     case HIP_FUNC_ATTRIBUTE_BINARY_VERSION:
       *value = hip::getCurrentDevice()->devices()[0]->isa().versionMajor() * 10 +
-          hip::getCurrentDevice()->devices()[0]->isa().versionMinor();
+               hip::getCurrentDevice()->devices()[0]->isa().versionMinor();
       break;
     case HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA:
       *value = 0;
@@ -224,9 +224,8 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
       (device::Kernel*)(kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
 
   if (attr == hipFuncAttributeMaxDynamicSharedMemorySize) {
-    if ((value < 0) ||
-        (value > (d_kernel->workGroupInfo()->availableLDSSize_ -
-                  d_kernel->workGroupInfo()->localMemSize_))) {
+    if ((value < 0) || (value > (d_kernel->workGroupInfo()->availableLDSSize_ -
+                                 d_kernel->workGroupInfo()->localMemSize_))) {
       HIP_RETURN(hipErrorInvalidValue);
     }
     d_kernel->workGroupInfo()->maxDynamicSharedSizeBytes_ = value;
@@ -913,8 +912,11 @@ hipError_t hipLaunchCooperativeKernel_spt(const void* f, dim3 gridDim, dim3 bloc
 
 hipError_t ihipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices,
                                                   unsigned int flags, uint32_t extFlags) {
-  if (launchParamsList == nullptr || numDevices > g_devices.size()) {
+  if (launchParamsList == nullptr) {
     return hipErrorInvalidValue;
+  }
+  if (numDevices > g_devices.size()) {
+    return hipErrorInvalidDevice;
   }
 
   std::vector<hipFunctionLaunchParams> functionLaunchParamsList(numDevices);

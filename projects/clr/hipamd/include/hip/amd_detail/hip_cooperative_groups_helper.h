@@ -56,19 +56,19 @@ using lane_mask = unsigned long long int;
 namespace cooperative_groups {
 
 /* Global scope */
-template <unsigned int size>
-using is_power_of_2 = __hip_internal::integral_constant<bool, (size & (size - 1)) == 0>;
+template <unsigned int size> using is_power_of_2 =
+    __hip_internal::integral_constant<bool, (size & (size - 1)) == 0>;
 
-template <unsigned int size>
-using is_valid_wavefront = __hip_internal::integral_constant<bool, size <= 64>;
+template <unsigned int size> using is_valid_wavefront =
+    __hip_internal::integral_constant<bool, size <= 64>;
 
-template <unsigned int size>
-using is_valid_tile_size = __hip_internal::integral_constant<
-    bool, is_power_of_2<size>::value && is_valid_wavefront<size>::value>;
+template <unsigned int size> using is_valid_tile_size =
+    __hip_internal::integral_constant<bool, is_power_of_2<size>::value &&
+                                                is_valid_wavefront<size>::value>;
 
-template <typename T>
-using is_valid_type = __hip_internal::integral_constant<
-    bool, __hip_internal::is_integral<T>::value || __hip_internal::is_floating_point<T>::value>;
+template <typename T> using is_valid_type =
+    __hip_internal::integral_constant<bool, __hip_internal::is_integral<T>::value ||
+                                                __hip_internal::is_floating_point<T>::value>;
 
 namespace internal {
 
@@ -185,6 +185,11 @@ __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
 __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_grid_is_valid()); }
 
 __CG_STATIC_QUALIFIER__ void sync() { __ockl_grid_sync(); }
+
+__CG_STATIC_QUALIFIER__ dim3 grid_dim() {
+  return (dim3(static_cast<__hip_uint32_t>(gridDim.x), static_cast<__hip_uint32_t>(gridDim.y),
+               static_cast<__hip_uint32_t>(gridDim.z)));
+}
 
 }  // namespace grid
 
