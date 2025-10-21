@@ -103,7 +103,6 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
         uint64_t buffer_size_gb = 1;
-
         // Are we testing for larger buffers?
         if(const char* var = std::getenv("ATT_LARGE_BUFFER_TEST"); var && atoi(var))
         {
@@ -134,7 +133,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         {
             // Dont generate instruction profiling, only occupancy and shaderdata
             parameters.emplace_back(rocprofiler_thread_trace_parameter_t{
-                ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, 1});
+                ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {1}});
         }
 
         ROCPROFILER_CALL(
