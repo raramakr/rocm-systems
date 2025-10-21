@@ -214,8 +214,6 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run: |
-          LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH \
-          PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH \
           python3 ./source/scripts/run-ci.py \
             -B build \
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core \
@@ -320,7 +318,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: [ 'mi325' ]
-        os: [ 'almalinux-8.10', 'sles-15.7' ]
+        os: [ 'almalinux-8.10', 'almalinux-10', 'sles-15.7' ]
         build-type: [ 'RelWithDebInfo' ]
         ci-flags: [ '' ]
     runs-on: linux-mi325-1gpu-ossci-rocm
