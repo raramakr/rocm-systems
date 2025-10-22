@@ -26,10 +26,12 @@
 #include "core/trace_cache/storage_parser.hpp"
 #include "debug.hpp"
 #include "library/runtime.hpp"
+#include "perfetto_post_processing.hpp"
 #include "trace_cache/cache_utility.hpp"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/rocpd_post_processing.hpp"
 #include <algorithm>
+#include <iterator>
 #include <memory>
 #include <vector>
 
@@ -45,7 +47,8 @@ list_dir_files(const std::string& path)
     DIR* dir = opendir(path.c_str());
     if(dir == nullptr)
     {
-        ROCPROFSYS_THROW("Error opening directory: %s", path.c_str());
+        std::cerr << "Error opening directory: " << path << std::endl;
+        return {};
     }
 
     std::vector<std::string> result{};
@@ -127,7 +130,7 @@ cache_manager::post_process_bulk()
             shutdown();
         }
 
-        if(get_use_rocpd())
+        if(get_use_rocpd() || get_use_perfetto())
         {
             ROCPROFSYS_PRINT(
                 "Generating rocpd with collected data. This may take a while..\n");
@@ -138,15 +141,36 @@ cache_manager::post_process_bulk()
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
             rocpd_threads.emplace_back([this]() {
-                auto                  pid  = getpid();
-                auto                  ppid = get_root_process_id();
-                rocpd_post_processing _post_processing(
-                    m_metadata, get_agent_manager_instance(), pid, ppid);
+                auto pid  = getpid();
+                auto ppid = get_root_process_id();
+
                 storage_parser _parser(
                     get_buffered_storage_filename(get_root_process_id(), getpid()));
-                _post_processing.register_parser_callback(_parser);
-                _post_processing.post_process_metadata();
+
+                rocpd_post_processing _rocpd_post_processing(
+                    m_metadata, get_agent_manager_instance(), pid, ppid);
+
+                perfetto_post_processing _perfetto_post_processing(
+                    m_metadata, pid, get_agent_manager_instance());
+
+                if(get_use_rocpd())
+                {
+                    _rocpd_post_processing.register_parser_callback(_parser);
+                    _rocpd_post_processing.post_process_metadata();
+                }
+                if(get_use_perfetto())
+                {
+                    _perfetto_post_processing.setup_perfetto();
+                    _perfetto_post_processing.register_parser_callback(_parser);
+                    _perfetto_post_processing.start_session();
+                }
                 _parser.consume_storage();
+
+                if(get_use_perfetto())
+                {
+                    bool _perfetto_error = false;
+                    _perfetto_post_processing.post_process(_perfetto_error);
+                }
             });
 
             for(const auto& [pid, files] : _cache_files)
@@ -171,14 +195,33 @@ cache_manager::post_process_bulk()
                             return;
                         }
 
-                        agent_manager         _agent_manager{ _agents };
-                        auto                  ppid = get_root_process_id();
-                        rocpd_post_processing _post_processing(_metadata, _agent_manager,
-                                                               pid, ppid);
-                        storage_parser        _parser(files.buff_storage);
-                        _post_processing.register_parser_callback(_parser);
-                        _post_processing.post_process_metadata();
+                        agent_manager _agent_manager{ _agents };
+                        auto          ppid = get_root_process_id();
+
+                        rocpd_post_processing _rocpd_post_processing(
+                            _metadata, _agent_manager, pid, ppid);
+                        perfetto_post_processing _perfetto_post_processing(
+                            _metadata, pid, _agent_manager);
+
+                        storage_parser _parser(files.buff_storage);
+                        if(get_use_rocpd())
+                        {
+                            _rocpd_post_processing.register_parser_callback(_parser);
+                            _rocpd_post_processing.post_process_metadata();
+                        }
+                        if(get_use_perfetto())
+                        {
+                            _perfetto_post_processing.register_parser_callback(_parser);
+                            _perfetto_post_processing.start_session();
+                        }
+
                         _parser.consume_storage();
+
+                        if(get_use_perfetto())
+                        {
+                            bool _perfetto_error = false;
+                            _perfetto_post_processing.post_process(_perfetto_error);
+                        }
                         std::remove(files.metadata.c_str());  // Remove metadata file
                     });
                 }
