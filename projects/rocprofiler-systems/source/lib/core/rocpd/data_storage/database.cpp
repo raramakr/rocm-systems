@@ -26,7 +26,6 @@
 #include "node_info.hpp"
 
 #include <config.hpp>
-#include <fstream>
 #include <regex>
 #include <timemory/environment/types.hpp>
 #include <timemory/utility/filepath.hpp>
@@ -51,7 +50,7 @@ enum rocpd_sql_schema_kind_t
     ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
     ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS
 };
-};
+}  // namespace
 
 #endif
 
