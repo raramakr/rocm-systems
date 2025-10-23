@@ -58,6 +58,8 @@ hipError_t LibraryContainer::GetKernelName(const char** name, hipKernel_t kernel
 }
 
 hipError_t LibraryContainer::EnumerateKernels(hipKernel_t* k, unsigned int maxKernels) {
+  std::scoped_lock<std::mutex> lock(lib_mutex_);
+
   auto maxCount = (maxKernels > functions_.size()) ? functions_.size() : maxKernels;
   auto device_id = hip::ihipGetDevice();
   auto m = fatbin_->Module(device_id);
@@ -232,9 +234,7 @@ hipError_t hipLibraryEnumerateKernels(hipKernel_t* kernels, unsigned int numKern
     HIP_RETURN(hipSuccess);
   }
 
-  ret = l->EnumerateKernels(kernels, numKernels);
-
-  HIP_RETURN(ret);
+  HIP_RETURN(l->EnumerateKernels(kernels, numKernels));
 }
 
 hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
@@ -243,7 +243,7 @@ hipError_t hipKernelGetLibrary(hipLibrary_t* library, hipKernel_t kernel) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (!hip::PlatformState::instance().GetLibraryFunction(kernel, library)) {
+  if (!hip::PlatformState::instance().GetFunctionLibrary(kernel, library)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
@@ -257,7 +257,7 @@ hipError_t hipKernelGetName(const char** name, hipKernel_t kernel) {
   }
 
   hipLibrary_t library;
-  if (!hip::PlatformState::instance().GetLibraryFunction(kernel, &library)) {
+  if (!hip::PlatformState::instance().GetFunctionLibrary(kernel, &library)) {
     HIP_RETURN(hipErrorInvalidHandle);
   }
 
